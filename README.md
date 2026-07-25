@@ -6,42 +6,35 @@
 An MCP server that gives AI tools access to public Ghana data. It runs on
 Cloudflare Workers as a remote MCP server over Streamable HTTP.
 
-v1 covers the **Ghana Stock Exchange**: daily price history and a company
-directory. Tools are namespaced by source (`gse_*`), so further Ghana data
-sources can be added without restructuring anything — see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+Tools are namespaced by source, so further Ghana data sources can be added
+without restructuring anything — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Data sources
+
+| Source                                         | Prefix | Tools | Covers                                          |
+| ---------------------------------------------- | ------ | ----- | ----------------------------------------------- |
+| [Ghana Stock Exchange](docs/GSE.md)            | `gse_` | 3     | Daily share prices, listed-company directory    |
+
+Each source has its own guide with a full tool reference, sample chat queries,
+and the data caveats specific to it. **Start with [docs/GSE.md](docs/GSE.md).**
 
 ## Tools
 
-| Tool                    | Input                          | Returns                                                   |
-| ----------------------- | ------------------------------ | --------------------------------------------------------- |
-| `gse_get_stock_history` | `symbol`, `days` (default 90)  | Daily OHLC + volume rows, oldest first                    |
-| `gse_list_companies`    | `market?`, `refresh?`          | Every listed company: share code, name, board, listing date |
-| `gse_search_company`    | `query`, `limit?`              | Best-matching companies with a confidence score           |
-| `ping`                  | –                              | Health check                                              |
-
-The directory covers all three boards — 34 Main Market companies, 5 on the Ghana
-Alternative Market, and 1 ETF, 40 in total as of 2026-07-25.
+| Tool                                                                      | Returns                                                       |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| [`gse_get_stock_history`](docs/GSE.md#gse_get_stock_history)               | Daily prices and volume for one share code, oldest first      |
+| [`gse_list_companies`](docs/GSE.md#gse_list_companies)                     | Every listed company: share code, name, board, listing date   |
+| [`gse_search_company`](docs/GSE.md#gse_search_company)                     | Best-matching companies for a name, with a confidence score   |
+| [`ping`](docs/GSE.md#ping)                                                 | Health check                                                  |
 
 Every result carries a `meta.origin` field — `live`, `cache`, `stale-cache`, or
-`static-seed` — plus a `meta.warning` when the data may be behind. Nothing is
-ever presented as fresh when it isn't.
+`static-seed` — plus a `meta.warning` when the data may be behind. Nothing is ever
+presented as fresh when it isn't.
 
-### Two caveats on GSE's own data
-
-**`high` and `low` are annual, not daily.** GSE's price table publishes a **Year
-High** and **Year Low** — the rolling 52-week extremes — and no intraday range.
-`high` and `low` are those columns. They barely move from row to row. The tool's
-schema says so too, so a model reading it will not misreport them.
-
-**`statedCapital`, `issuedShares` and `authorisedShares` are free text.** They
-are passed through verbatim as strings and must not be calculated with. What GSE
-stores there is genuinely inconsistent: five different currencies (`ZAR
-4,899,021,716.98`, `US$867,714,000`, `DALASIS 200,000,000`), mixed units (`2.9
-million` next to `118,093,134`), dots as thousands separators (`600.000.000`),
-prose (`Pre-Listing: GHS40,000 Post-Listing: …`), and typos (`GHS400milliion`,
-`GH(`). Parsing that would produce numbers wrong by orders of magnitude, which is
-worse for a caller than text they can see is approximate.
+Some of what GSE publishes is easy to misread — `high`/`low` are annual rather
+than daily, a price row does not mean the stock traded, and the capital columns are
+free text. The tool schemas carry those warnings, and
+[docs/GSE.md](docs/GSE.md#reading-the-data-correctly) explains each one.
 
 ## Quick start
 
@@ -50,38 +43,13 @@ git clone git@github.com:epigos/ghana-data-mcp.git
 cd ghana-data-mcp
 npm install
 npm test
-```
-
-Run it locally:
-
-```bash
 npm run dev
 ```
 
-Then point any MCP client at `http://localhost:8787/mcp`.
+Point any MCP client at `http://localhost:8787/mcp`. Client-by-client setup, and
+queries to try once connected, are in [docs/GSE.md](docs/GSE.md#setup).
 
-### Claude Code
-
-```bash
-claude mcp add --transport http ghana-data http://localhost:8787/mcp
-```
-
-### Claude Desktop
-
-`claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "ghana-data": {
-      "type": "http",
-      "url": "http://localhost:8787/mcp"
-    }
-  }
-}
-```
-
-Swap the URL for your `workers.dev` URL once deployed.
+Requires Node 22 or newer.
 
 ## Deploying
 
@@ -112,42 +80,32 @@ MCP client ──► Worker /mcp ──► sources/gse ──► lib/{http,cache
                                                   Workers KV
 ```
 
-gse.com.gh is a WordPress site using wpDataTables. There is no documented API,
-so the client reproduces what the page's own JavaScript does:
+MCP is served at `/mcp` by the Cloudflare Agents SDK's stateless handler, so there
+is no Durable Object to deploy: every tool is an independent read-only scrape with
+no session state worth keeping.
 
-1. `GET` the page → a `__cf_bm` cookie and a `wdtNonce` per table on it
-2. `POST /wp-admin/admin-ajax.php?action=get_wdtable&table_id=<id>` with both →
-   the table rows as JSON
+Each source owns a folder under `src/sources/` with the same internal shape —
+`client.ts` talks upstream, `parser.ts` is pure transformation, `tools.ts`
+registers the MCP tools — and shares the infrastructure in `src/lib/`. The
+upstream mechanics for GSE specifically are in
+[docs/GSE.md](docs/GSE.md#how-the-scrape-works).
 
-Neither step is optional; without the cookie/nonce pair the endpoint refuses.
+### Caching and degradation
 
-Two pages and five tables are involved:
+Cached in Workers KV, with the logical freshness window stored *inside* the value
+and a 30-day retention on the entry itself. That is what makes the stale fallback
+possible: if KV expired entries at the TTL there would be nothing left to serve
+when a scrape fails.
 
-| Page                 | Table | Contents                            | Used |
-| -------------------- | ----- | ----------------------------------- | ---- |
-| `/trading-and-data/` | 39    | Daily share prices                  | yes  |
-| `/trading-and-data/` | 47    | GSE Composite Index, market cap     | no   |
-| `/listed-companies/` | 34    | Main Market companies               | yes  |
-| `/listed-companies/` | 35    | Exchange Traded Funds               | yes  |
-| `/listed-companies/` | 36    | Ghana Alternative Market companies  | yes  |
-| `/listed-companies/` | 37    | Fixed-income corporate issuers      | no   |
+The tools try, in order: a live scrape, a fresh cached copy, an expired cached
+copy, and — for the GSE directory — a built-in seed list. Each outcome is labelled
+in `meta.origin`.
 
-Nonces are per-table but issued per page load, so the three-table company scrape
-takes one page fetch, not three. Reading all three matters: the Main Market table
-alone misses six tradeable symbols that do appear in the price table, so a caller
-could otherwise look up history for a company the directory never mentioned.
+A partial failure degrades partially rather than wholly: if one company table
+errors while another succeeds, the directory returns what it got plus a warning
+naming the missing board, instead of nothing at all.
 
-### Caching
-
-| Key                                | Fresh for                                      |
-| ---------------------------------- | ---------------------------------------------- |
-| `gse:companies:v1`                 | 7 days                                         |
-| `gse:history:v1:{symbol}:{days}`   | 15 min during GSE hours, 12 h otherwise        |
-
-Entries are retained in KV for 30 days past their freshness window. That is what
-makes the stale fallback work: when a scrape fails and an expired copy is on
-hand, the copy is served with `origin: "stale-cache"` and a warning, rather than
-failing the call.
+Per-source cache keys and TTLs are documented with the source.
 
 ### Logging
 
@@ -155,14 +113,11 @@ Every outbound request is logged, because `lib/http.ts` is the single choke poin
 for network traffic — no source can reach the internet unobserved. Workers routes
 `console.*` into Workers Logs, so there is nothing to configure.
 
-Two levels, split by what they cost:
-
 - **`info` and above are always on.** One line per upstream request is cheap,
   since the cache absorbs the repeats, and it is the first thing you want when a
   tool misbehaves.
 - **`debug` needs `DEBUG = "1"`** in `wrangler.toml` (or `wrangler dev --var
-  DEBUG:1`). This is the noisy detail: request bodies, nonces, cache keys, retry
-  delays.
+  DEBUG:1`) — request bodies, nonces, cache keys, retry delays.
 
 A cache hit is visible by its absence of HTTP lines:
 
@@ -179,17 +134,17 @@ info  | tool: gse_get_stock_history | source=gse symbol=GCB days=14
 info  | tool: gse_get_stock_history done | source=gse symbol=GCB rows=10 origin=cache ageSeconds=0
 ```
 
-Every line carries `source=gse`, so a second data source stays greppable apart.
+Every line carries its `source`, so a second data source stays greppable apart.
 
-**Cookies are never logged** — `__cf_bm` is a session token, so the request line
-records only `cookies=yes|no`, and the debug line lists cookie *names*. Nonces
-*are* logged: they come from the public page HTML, are scoped to one page load,
-and are exactly what you need to diagnose a rejected POST.
+**Cookies are never logged** — a session cookie would be a liability in a log
+aggregator, so the request line records only `cookies=yes|no`. Nonces *are*
+logged: they come from public page HTML and are what you need to diagnose a
+rejected POST.
 
 ### Being a good citizen upstream
 
 - A descriptive `User-Agent` that names the project and links to this repo.
-- Cache-first, so repeat questions never reach gse.com.gh.
+- Cache-first, so repeat questions never reach the source site.
 - Jittered exponential backoff on 403/429/5xx instead of retrying immediately.
 - An inbound per-IP limit of 30 requests/minute, to stop a looping client from
   turning into a load problem for someone else's website.
@@ -202,43 +157,36 @@ npm run typecheck
 npm run test:live # optional: hits gse.com.gh to catch upstream markup changes
 ```
 
-The unit tests run against saved fixtures in `test/fixtures/`, so CI never
-depends on a third-party site being up. `test:live` is the canary for upstream
-changes and is skipped by default.
+The unit tests run against saved fixtures in `test/fixtures/`, so CI never depends
+on a third-party site being up. `test:live` is the canary for upstream changes and
+is skipped by default.
 
-Requires Node 22 or newer.
+For end-to-end checks through a real MCP client, the query set in
+[docs/GSE.md](docs/GSE.md#sample-chat-queries) exercises every tool, the fuzzy
+search, the cache, and the awkward data cases.
 
 ### CI
 
-| Workflow                                                    | Trigger                          | Does                                             |
-| ----------------------------------------------------------- | -------------------------------- | ------------------------------------------------ |
-| [`ci.yml`](.github/workflows/ci.yml)                         | push to `main`, PRs, manual      | Typecheck + unit tests on Node 22 and 24, plus a `wrangler deploy --dry-run` bundle check |
-| [`upstream-canary.yml`](.github/workflows/upstream-canary.yml) | 16:30 UTC Mon & Thu, manual      | The live tests against gse.com.gh                |
+| Workflow                                                       | Trigger                     | Does                                                                                      |
+| -------------------------------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------- |
+| [`ci.yml`](.github/workflows/ci.yml)                           | push to `main`, PRs, manual | Typecheck + unit tests on Node 22 and 24, plus a `wrangler deploy --dry-run` bundle check |
+| [`upstream-canary.yml`](.github/workflows/upstream-canary.yml) | 16:30 UTC Mon & Thu, manual | The live tests against gse.com.gh                                                         |
 
 The split is the point: CI stays green or red on **our** code, never on whether
-gse.com.gh happens to be up. The canary is the only job that touches the live
-site, and a failure there usually means GSE changed its markup rather than that
-this code broke — `test/integration/gse.live.test.ts` shows which assumption
-stopped holding. Neither workflow needs any secret.
-
-## Degradation
-
-The tools try, in order: a live scrape, a fresh cached copy, an expired cached
-copy, and — for the directory only — a built-in seed list of the 32 Main Market
-companies. Each outcome is labelled in `meta.origin`, so a caller can always tell
-what it is holding.
-
-A partial failure degrades partially rather than wholly: if the GAX table errors
-while the Main Market table succeeds, the directory returns 35 companies and a
-warning naming the missing board, instead of nothing at all.
+gse.com.gh happens to be up. The canary is the only job that touches the live site,
+and a failure there usually means GSE changed its markup rather than that this code
+broke — `test/integration/gse.live.test.ts` shows which assumption stopped holding.
+Neither workflow needs any secret.
 
 ## Status
 
-Complete: price history, the live company directory across all three boards,
-fuzzy company search, caching, stale and seed fallbacks, rate limiting.
+Complete: GSE price history, the live company directory across all three boards,
+fuzzy company search, caching, stale and seed fallbacks, rate limiting, logging.
 
-Not implemented: the market-index table (47) and fixed-income issuers (37) are
-identified in the client but unused — they are the obvious next tools if wanted.
+Not implemented: GSE's market-index table and fixed-income issuers are identified
+in the client but unused — they are the obvious next tools. Further sources (Bank
+of Ghana FX rates, Ghana Statistical Service indicators) are what the namespacing
+exists for.
 
 ## License
 
