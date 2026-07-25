@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { createCache, createMemoryKV, type Cache } from "../../../src/lib/cache.js";
 import { BOG_PAGES, BogClient } from "../../../src/sources/bog/client.js";
-import { InterbankFxRateSchema } from "../../../src/sources/bog/types.js";
+import { BillRateSchema, InterbankFxRateSchema } from "../../../src/sources/bog/types.js";
 import {
   BOG_STUB_TOOL_NAMES,
   BOG_TOOL_NAMES,
@@ -16,6 +16,10 @@ import { errorResponse, htmlResponse, jsonResponse, stubFetch } from "../../help
 
 const fxPageHtml = fixture("bog-interbank-fx.trimmed.html");
 const fxPayload = fixtureJson("bog-interbank-fx.json");
+const tbillPageHtml = fixture("bog-treasury-bill-rates.trimmed.html");
+const tbillPayload = fixtureJson("bog-treasury-bill-rates.json");
+const bogBillPageHtml = fixture("bog-central-bank-bill-rates.trimmed.html");
+const bogBillPayload = fixtureJson("bog-central-bank-bill-rates.json");
 
 interface ToolResult {
   isError?: boolean;
@@ -60,6 +64,28 @@ async function fxHarness(
   registerBogTools(server, {
     client: new BogClient({ fetchImpl, baseDelayMs: 0, retries: 0 }),
     cache: options.cache ?? createCache(createMemoryKV()),
+  });
+
+  const client = new Client({ name: "test-client", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+
+  return { client, calls };
+}
+
+/** Harness with the bill-rate routes wired. */
+async function billHarness(options: { tableResponses?: Array<() => Response> } = {}) {
+  const { fetch: fetchImpl, calls } = stubFetch([
+    { match: "/treasury-bill-rates/", responses: [() => htmlResponse(tbillPageHtml, [])] },
+    { match: "/bank-of-ghana-bill-rates/", responses: [() => htmlResponse(bogBillPageHtml, [])] },
+    { match: "table_id=2", responses: options.tableResponses ?? [() => jsonResponse(tbillPayload)] },
+    { match: "table_id=3", responses: [() => jsonResponse(bogBillPayload)] },
+  ]);
+
+  const server = new McpServer({ name: "test", version: "0.0.0" });
+  registerBogTools(server, {
+    client: new BogClient({ fetchImpl, baseDelayMs: 0, retries: 0 }),
+    cache: createCache(createMemoryKV()),
   });
 
   const client = new Client({ name: "test-client", version: "0.0.0" });
@@ -170,8 +196,6 @@ describe("BoG stub behaviour", () => {
     const { client } = await harness();
 
     const cases: Array<[string, string]> = [
-      ["bog_get_treasury_bill_rates", BOG_PAGES.treasuryBillRates],
-      ["bog_get_central_bank_bill_rates", BOG_PAGES.centralBankBillRates],
       ["bog_get_interbank_interest_rates", BOG_PAGES.interbankInterestRates],
       ["bog_get_treasury_auction_results", BOG_PAGES.treasuryAuctionResults],
       ["bog_get_central_bank_auction_results", BOG_PAGES.centralBankAuctionResults],
@@ -193,7 +217,7 @@ describe("BoG stub behaviour", () => {
 
   it("does not blame the source site for a gap in this server", async () => {
     const { client } = await harness();
-    const text = (await call(client, "bog_get_treasury_bill_rates")).content[0]?.text ?? "";
+    const text = (await call(client, "bog_get_interbank_interest_rates")).content[0]?.text ?? "";
 
     // "Upstream request failed" would send someone debugging bog.gov.gh.
     expect(text).not.toMatch(/upstream request failed|could not be reached|returned \d{3}/i);
@@ -205,7 +229,7 @@ describe("BoG stub inputs", () => {
   // can code against them before the data lands.
   it("accepts a day window on the rate series", async () => {
     const { client } = await harness();
-    const result = await call(client, "bog_get_treasury_bill_rates", { days: 30 });
+    const result = await call(client, "bog_get_interbank_interest_rates", { days: 30 });
 
     // Still an error, but a *not-implemented* error rather than a validation one.
     expect(result.content[0]?.text).toMatch(/not implemented yet/i);
@@ -213,7 +237,7 @@ describe("BoG stub inputs", () => {
 
   it("rejects a day window outside the supported range", async () => {
     const { client } = await harness();
-    const result = await call(client, "bog_get_treasury_bill_rates", { days: 99_999 });
+    const result = await call(client, "bog_get_interbank_interest_rates", { days: 99_999 });
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).not.toMatch(/not implemented yet/i);
@@ -339,5 +363,150 @@ describe("bog_get_interbank_fx_rates", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toMatch(/503/);
+  });
+});
+
+interface BillPayload {
+  days: number;
+  rowCount: number;
+  rows: Array<{
+    date: string;
+    tenderNumber: string;
+    securityType: string;
+    tenorDays?: number;
+    discountRate: number;
+    interestRate: number;
+  }>;
+  meta: { origin: string; warning?: string };
+}
+
+describe("bog_get_treasury_bill_rates", () => {
+  it("returns rows matching the published schema", async () => {
+    const { client } = await billHarness();
+    const result = await call(client, "bog_get_treasury_bill_rates");
+    const payload = result.structuredContent as unknown as BillPayload;
+
+    expect(result.isError).toBeFalsy();
+    expect(payload.meta.origin).toBe("live");
+    expect(payload.days).toBe(90);
+    expect(payload.rowCount).toBe(payload.rows.length);
+    expect(payload.rowCount).toBe(36);
+    for (const row of payload.rows) expect(() => BillRateSchema.parse(row)).not.toThrow();
+  });
+
+  it("reads the columns the bill table uses", async () => {
+    const { client } = await billHarness();
+    const payload = (await call(client, "bog_get_treasury_bill_rates"))
+      .structuredContent as unknown as BillPayload;
+
+    // Fixture row: ['20 Jul 2026','2016','364 DAY BILL','11.5008','12.9954']
+    expect(payload.rows.at(-1)).toEqual({
+      date: "2026-07-20",
+      tenderNumber: "2016",
+      securityType: "91 DAY BILL",
+      tenorDays: 91,
+      discountRate: 5.702,
+      interestRate: 5.7845,
+    });
+  });
+
+  it("returns rows oldest first", async () => {
+    const { client } = await billHarness();
+    const dates = (
+      (await call(client, "bog_get_treasury_bill_rates")).structuredContent as unknown as BillPayload
+    ).rows.map((row) => row.date);
+
+    expect(dates).toEqual([...dates].sort());
+  });
+
+  // The upstream security-type search matches whole values exactly, so filtering
+  // in memory is what lets "91" work as well as "91 DAY BILL".
+  it("filters leniently by security type", async () => {
+    const { client } = await billHarness();
+
+    for (const query of ["91", "91 DAY", "91 DAY BILL", "91 day bill"]) {
+      const payload = (await call(client, "bog_get_treasury_bill_rates", { securityType: query }))
+        .structuredContent as unknown as BillPayload;
+
+      expect(payload.rowCount, query).toBeGreaterThan(0);
+      expect(
+        payload.rows.every((row) => row.securityType === "91 DAY BILL"),
+        query,
+      ).toBe(true);
+    }
+  });
+
+  it("lists what is available when the requested security is not there", async () => {
+    const { client } = await billHarness();
+    const payload = (await call(client, "bog_get_treasury_bill_rates", { securityType: "5 YR" }))
+      .structuredContent as unknown as BillPayload;
+
+    expect(payload.rowCount).toBe(0);
+    expect(payload.meta.warning).toMatch(/Available: 182 DAY BILL, 364 DAY BILL, 91 DAY BILL/);
+  });
+
+  it("serves a type-filtered query from the same cache entry", async () => {
+    const { client, calls } = await billHarness();
+
+    await call(client, "bog_get_treasury_bill_rates");
+    const afterFirst = calls.length;
+    const second = await call(client, "bog_get_treasury_bill_rates", { securityType: "364" });
+
+    expect(calls.length).toBe(afterFirst);
+    expect((second.structuredContent as unknown as BillPayload).meta.origin).toBe("cache");
+  });
+
+  it("sends a BoG-formatted date range upstream", async () => {
+    const { client, calls } = await billHarness();
+    await call(client, "bog_get_treasury_bill_rates", { days: 90 });
+
+    const form = Object.fromEntries(new URLSearchParams(calls[1]?.body ?? ""));
+    expect(form["columns[0][search][value]"]).toMatch(
+      /^\d{2} [A-Z][a-z]{2} \d{4}\|\d{2} [A-Z][a-z]{2} \d{4}$/,
+    );
+    expect(form["sRangeSeparator"]).toBe("|");
+    // These tables declare ordered columns, unlike the FX one.
+    expect(form["columns[0][orderable]"]).toBe("true");
+  });
+
+  it("reports an upstream failure as a tool error", async () => {
+    const { client } = await billHarness({ tableResponses: [() => errorResponse(503)] });
+    const result = await call(client, "bog_get_treasury_bill_rates");
+
+    expect(result.isError).toBe(true);
+  });
+});
+
+describe("bog_get_central_bank_bill_rates", () => {
+  // The two series must not be confused: these are BoG's own issuance at much
+  // shorter tenors, and a caller asking for one should never get the other.
+  it("returns the central bank's own series, not the Treasury one", async () => {
+    const { client } = await billHarness();
+    const payload = (await call(client, "bog_get_central_bank_bill_rates"))
+      .structuredContent as unknown as BillPayload;
+
+    expect(payload.rowCount).toBe(5);
+    expect(payload.rows.every((row) => row.securityType === "14 DAY BILL")).toBe(true);
+    expect(payload.rows[0]?.tenorDays).toBe(14);
+  });
+
+  it("queries its own table, on its own page", async () => {
+    const { client, calls } = await billHarness();
+    await call(client, "bog_get_central_bank_bill_rates");
+
+    expect(calls[0]?.url).toContain("/bank-of-ghana-bill-rates/");
+    expect(calls[1]?.url).toContain("table_id=3");
+  });
+
+  it("caches separately from the Treasury series", async () => {
+    const { client } = await billHarness();
+
+    const treasury = (await call(client, "bog_get_treasury_bill_rates"))
+      .structuredContent as unknown as BillPayload;
+    const central = (await call(client, "bog_get_central_bank_bill_rates"))
+      .structuredContent as unknown as BillPayload;
+
+    expect(treasury.rowCount).not.toBe(central.rowCount);
+    expect(central.meta.origin).toBe("live");
   });
 });

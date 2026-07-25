@@ -6,17 +6,21 @@ import { describeError } from "../../lib/errors.js";
 import { silentLogger, type Logger } from "../../lib/log.js";
 import { ResultMetaSchema, toolError, toolResult, type DataOrigin } from "../../lib/results.js";
 import { BogClient } from "./client.js";
-import { parseInterbankFxPayload } from "./parser.js";
-import { DEFAULT_DAYS, InterbankFxRateSchema, MAX_DAYS } from "./types.js";
+import { parseBillRatePayload, parseInterbankFxPayload } from "./parser.js";
+import { BillRateSchema, DEFAULT_DAYS, InterbankFxRateSchema, MAX_DAYS } from "./types.js";
 
 /** FX is published once a day, so an hour of freshness is plenty. */
 const FX_CACHE_KEY = "bog:interbank-fx:v1";
 const FX_TTL_SECONDS = 60 * 60;
 
+/** Bill rates are set at weekly tenders, so a day of freshness is generous. */
+const BILL_RATE_TTL_SECONDS = 12 * 60 * 60;
+
 /**
  * MCP tool surface for Bank of Ghana data, namespaced `bog_`.
  *
- * Interbank FX rates are implemented. The remaining six are registered stubs:
+ * Interbank FX rates and the two bill-rate series are implemented. The remaining
+ * four are registered stubs:
  * final input schemas and descriptions, but calling one returns an error. That
  * fixes the contract — names, inputs, which dataset belongs in which tool — before
  * the parsing work, and keeps the registration and docs scaffolding tested.
@@ -72,26 +76,6 @@ interface StubDefinition {
 }
 
 const STUBS: readonly StubDefinition[] = [
-  {
-    name: "bog_get_treasury_bill_rates",
-    title: "Ghana Treasury bill rates",
-    description:
-      "Discount and interest rates for Government of Ghana Treasury securities (91-day, " +
-      "182-day and 364-day bills), as published by the Bank of Ghana. Use this for questions " +
-      "about Ghanaian T-bill yields or the risk-free rate.",
-    inputSchema: daysInput("rate history"),
-    probe: (client) => client.fetchTreasuryBillRates(),
-  },
-  {
-    name: "bog_get_central_bank_bill_rates",
-    title: "Bank of Ghana bill rates",
-    description:
-      "Discount and interest rates for securities issued by the Bank of Ghana itself (BOG " +
-      "bills), as distinct from Government of Ghana Treasury bills — for those use " +
-      "bog_get_treasury_bill_rates.",
-    inputSchema: daysInput("rate history"),
-    probe: (client) => client.fetchCentralBankBillRates(),
-  },
   {
     name: "bog_get_interbank_interest_rates",
     title: "Ghana interbank interest rates",
@@ -227,6 +211,124 @@ export function registerBogTools(server: McpServer, deps: BogDeps): void {
     },
   );
 
+  const billRateTools = [
+    {
+      name: "bog_get_treasury_bill_rates",
+      title: "Ghana Treasury bill rates",
+      issuer: "Government of Ghana",
+      cacheKey: "bog:treasury-bill-rates:v1",
+      description:
+        "Discount and interest rates for Government of Ghana Treasury securities, oldest first, " +
+        "as published by the Bank of Ghana. Covers the 91-, 182- and 364-day bills and also the " +
+        "longer FXR notes and bonds that appear in the same table. Use this for Ghanaian T-bill " +
+        "yields or a risk-free rate. For securities the central bank issues itself, use " +
+        "bog_get_central_bank_bill_rates.",
+      fetch: (client: BogClient, days: number) => client.fetchTreasuryBillRates(days),
+    },
+    {
+      name: "bog_get_central_bank_bill_rates",
+      title: "Bank of Ghana bill rates",
+      issuer: "Bank of Ghana",
+      cacheKey: "bog:central-bank-bill-rates:v1",
+      description:
+        "Discount and interest rates for securities issued by the Bank of Ghana itself — BOG " +
+        "bills, typically short tenors such as 14-day — oldest first. These are NOT Government " +
+        "of Ghana Treasury bills; for those use bog_get_treasury_bill_rates.",
+      fetch: (client: BogClient, days: number) => client.fetchCentralBankBillRates(days),
+    },
+  ] as const;
+
+  for (const tool of billRateTools) {
+    server.registerTool(
+      tool.name,
+      {
+        title: tool.title,
+        description: tool.description,
+        inputSchema: {
+          days: z
+            .number()
+            .int()
+            .min(1)
+            .max(MAX_DAYS)
+            .optional()
+            .describe(`Calendar days of history to look back. Default ${DEFAULT_DAYS}.`),
+          securityType: z
+            .string()
+            .optional()
+            .describe(
+              "Restrict to one security. Matched leniently, so \"91\", \"91 DAY\" and " +
+                "\"91 DAY BILL\" all work. Omit for every security in the window.",
+            ),
+        },
+        outputSchema: {
+          days: z.number(),
+          rowCount: z.number(),
+          rows: z.array(BillRateSchema),
+          meta: ResultMetaSchema,
+        },
+        annotations: { readOnlyHint: true, openWorldHint: true },
+      },
+      async ({ days, securityType }) => {
+        const requestedDays = days ?? DEFAULT_DAYS;
+        log.info(`tool: ${tool.name}`, { days: requestedDays, securityType: securityType ?? "all" });
+
+        try {
+          // Cached unfiltered for the window, then filtered in memory, so asking
+          // for one tenor after another does not re-scrape.
+          const key = `${tool.cacheKey}:${requestedDays}`;
+          const result = await readThrough(deps.cache, key, BILL_RATE_TTL_SECONDS, async () =>
+            parseBillRatePayload(await tool.fetch(deps.client, requestedDays)),
+          );
+
+          const { rows: allRows, skipped } = result.value;
+          const wanted = securityType?.trim().toUpperCase();
+          const rows = wanted
+            ? allRows.filter((row) => row.securityType.toUpperCase().startsWith(wanted))
+            : allRows;
+
+          log.info(`tool: ${tool.name} done`, {
+            rows: rows.length,
+            skipped: skipped || undefined,
+            origin: result.origin,
+          });
+
+          const warnings: string[] = [];
+          if (result.origin === "stale-cache") {
+            warnings.push(
+              `bog.gov.gh could not be reached (${result.staleReason}); serving a cached copy from ${Math.round(result.ageSeconds / 3600)} hour(s) ago.`,
+            );
+          }
+          if (skipped > 0) {
+            warnings.push(`${skipped} row(s) were dropped because required rate fields were missing.`);
+          }
+          if (rows.length === 0) {
+            const available = [...new Set(allRows.map((row) => row.securityType))].sort();
+            warnings.push(
+              wanted && available.length > 0
+                ? `No "${securityType}" security in the last ${requestedDays} days. Available: ${available.join(", ")}.`
+                : `${tool.issuer} published no rates in the last ${requestedDays} days. Try a longer window.`,
+            );
+          }
+
+          return toolResult({
+            days: requestedDays,
+            rowCount: rows.length,
+            rows,
+            meta: {
+              origin: result.origin as DataOrigin,
+              ageSeconds: result.ageSeconds,
+              skippedRows: skipped,
+              ...(warnings.length > 0 ? { warning: warnings.join(" ") } : {}),
+            },
+          });
+        } catch (error) {
+          log.error(`tool: ${tool.name} failed`, { reason: describeError(error) });
+          return toolError(describeError(error));
+        }
+      },
+    );
+  }
+
   for (const stub of STUBS) {
     server.registerTool(
       stub.name,
@@ -267,5 +369,7 @@ export const BOG_STUB_TOOL_NAMES: readonly string[] = STUBS.map((stub) => stub.n
 /** Every tool this source registers. Exported so tests and docs stay in step. */
 export const BOG_TOOL_NAMES: readonly string[] = [
   "bog_get_interbank_fx_rates",
+  "bog_get_treasury_bill_rates",
+  "bog_get_central_bank_bill_rates",
   ...BOG_STUB_TOOL_NAMES,
 ];

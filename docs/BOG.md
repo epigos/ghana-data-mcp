@@ -3,8 +3,9 @@
 Treasury and money-market data published by the Bank of Ghana at
 [bog.gov.gh](https://www.bog.gov.gh/treasury-and-the-markets/). Seven tools.
 
-> **Status: 1 of 7 implemented.** Interbank FX rates work. The other six are
-> registered stubs — final input schemas, but calling one returns an error.
+> **Status: 3 of 7 implemented.** Interbank FX rates and the two bill-rate series
+> work. The other four are registered stubs — final input schemas, but calling one
+> returns an error.
 >
 > There is a certificate problem on BoG's server that stops the Workers runtime
 > fetching it at all — see [TLS blocker](#blocker-bogs-tls-chain-is-incomplete).
@@ -29,8 +30,8 @@ URLs were fetched and returned HTTP 200 on 2026-07-25.
 | Tool                                   | Dataset                                  | Status |
 | -------------------------------------- | ---------------------------------------- | ------ |
 | `bog_get_interbank_fx_rates`           | Daily Interbank FX Rates                 | **live** |
-| `bog_get_treasury_bill_rates`          | Treasury Bill Rate                       | stub   |
-| `bog_get_central_bank_bill_rates`      | Bank of Ghana Bill Rates                 | stub   |
+| `bog_get_treasury_bill_rates`          | Treasury Bill Rate                       | **live** |
+| `bog_get_central_bank_bill_rates`      | Bank of Ghana Bill Rates                 | **live** |
 | `bog_get_interbank_interest_rates`     | Interbank Interest Rates                 | stub   |
 | `bog_get_treasury_auction_results`     | Weekly GOG T-Bill Auction Results        | stub   |
 | `bog_get_central_bank_auction_results` | Weekly BOG Bill Auction Results          | stub   |
@@ -56,19 +57,20 @@ The input contracts are final and can be coded against now:
 | Tool                                   | Input                                             |
 | -------------------------------------- | ------------------------------------------------- |
 | `bog_get_interbank_fx_rates`           | `currency` only — **no date window**, see below   |
-| Bill rates, interbank interest rates   | `days` — calendar days back, default 90, max 1825 |
+| Bill rates                             | `days` (default 90, max 1825) plus `securityType` |
+| `bog_get_interbank_interest_rates`     | `days`, plus `frequency` — `daily` or `weekly`    |
 | `bog_get_interbank_interest_rates`     | plus `frequency` — `daily` or `weekly`            |
 | Auction results                        | `limit` — most recent auctions, default 12        |
 | `bog_list_external_facilities`         | `refresh`                                         |
 
 ### Outputs
 
-`bog_get_interbank_fx_rates` declares a full `outputSchema`. The six stubs declare
+The three implemented tools declare a full `outputSchema`. The four stubs declare
 none: their row shapes land with each implementation, once the real payload is in
 hand. Publishing a guessed schema would invite callers to code against fields that
 may not survive contact with the data — worse than publishing nothing.
 
-## The one implemented tool
+## Implemented tools
 
 ### `bog_get_interbank_fx_rates`
 
@@ -125,6 +127,87 @@ model reports the limit instead of inventing a trend.
 > **What's the cedi worth in Naira?**
 
 Tests the non-major coverage: `NGN`-side rates are published under `Naira`.
+
+### `bog_get_treasury_bill_rates` and `bog_get_central_bank_bill_rates`
+
+Two series with one shape. **Treasury** is Government of Ghana issuance (table 2,
+1355 rows back to 2013); **central bank** is what the Bank of Ghana issues itself
+(table 3, 585 rows back to 2016, typically 14-day). They are not interchangeable and
+a caller asking for one never gets the other.
+
+| Input          | Type   | Notes                                                              |
+| -------------- | ------ | ------------------------------------------------------------------ |
+| `days`         | number | Calendar days back. Default 90, max 1825.                          |
+| `securityType` | string | Matched leniently: `91`, `91 DAY` and `91 DAY BILL` all work.       |
+
+Rows come back oldest first:
+
+```json
+{
+  "date": "2026-07-20",
+  "tenderNumber": "2016",
+  "securityType": "91 DAY BILL",
+  "tenorDays": 91,
+  "discountRate": 5.702,
+  "interestRate": 5.7845
+}
+```
+
+Real output for the 60 days to 2026-07-25 — 24 rows, three securities per weekly
+tender:
+
+```
+2026-07-13  tender 2015  182 DAY BILL   discount 7.4965   interest 7.7884
+2026-07-13  tender 2015  364 DAY BILL   discount 11.4978  interest 12.9915
+2026-07-13  tender 2015  91 DAY BILL    discount 5.777    interest 5.8617
+2026-07-20  tender 2016  182 DAY BILL   discount 7.3926   interest 7.6763
+2026-07-20  tender 2016  364 DAY BILL   discount 11.5008  interest 12.9954
+2026-07-20  tender 2016  91 DAY BILL    discount 5.702    interest 5.7845
+```
+
+Three things worth knowing:
+
+- **It is not only bills.** The same table carries longer securities — a 2020 window
+  returns `2 YR FXR NOTE` and `3`, `5`, `6` and `7 YR FXR BOND` alongside the bills.
+  `securityType` is verbatim so nothing is lost.
+- **`tenorDays` is absent for anything quoted in years.** Converting `2 YR` to days
+  would invent precision BoG does not publish; a two-year note is not exactly 730
+  days and nothing here knows its real maturity.
+- **`tenderNumber` is an identifier, not a quantity.** It arrives with thousands
+  separators (`1,517`), which are stripped so a caller matching the string does not
+  have to guess.
+
+Cached for 12 hours per `days` window — rates are set at weekly tenders, so hitting
+a central bank's site more often than that would be rude for no gain. The window is
+cached unfiltered, so asking for one tenor after another does not re-scrape.
+
+#### Sample chat queries
+
+> **What's the current 91-day Treasury bill rate in Ghana?**
+
+`securityType: "91"` is enough. The answer to quote is `interestRate` — the yield —
+with `discountRate` alongside if the distinction matters.
+
+> **How have Ghana's 364-day T-bill yields moved over the past year?**
+
+`days: 365, securityType: "364"`. About 52 rows, one per weekly tender.
+
+> **Compare the 91, 182 and 364-day rates from the latest tender.**
+
+One call with no `securityType`; the model reads the last three rows, which share a
+tender number.
+
+> **What rate does the Bank of Ghana pay on its own bills?**
+
+`bog_get_central_bank_bill_rates`. Worth keeping in the set because BoG's issuance
+is intermittent — the most recent as of 2026-07-25 was 16 March — so a 90-day window
+can legitimately come back empty, and the honest answer widens the window rather
+than reporting no such data.
+
+> **Did Ghana issue any bonds in 2020?**
+
+`days` reaching back to 2020 surfaces the FXR notes and bonds, showing the table is
+broader than its name.
 
 ## Blocker: BoG's TLS chain is incomplete
 

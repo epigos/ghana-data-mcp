@@ -36,3 +36,28 @@ export const InterbankFxRateSchema = z.object({
   mid: z.number().describe("Mid rate — the one to quote if only one number is wanted."),
 });
 export type InterbankFxRate = z.infer<typeof InterbankFxRateSchema>;
+
+/**
+ * One published rate for a government or central-bank security.
+ *
+ * Note that BoG's "Treasury Bill Rate" table is not only bills: alongside the 91,
+ * 182 and 364-day bills it carries notes and bonds (`2 YR FXR NOTE`,
+ * `7 YR FXR BOND`). `securityType` is verbatim so nothing is lost, and `tenorDays`
+ * is filled in only where the label states a tenor in days.
+ */
+export const BillRateSchema = z.object({
+  date: z.string().describe("Issue date, ISO 8601 (YYYY-MM-DD)."),
+  tenderNumber: z
+    .string()
+    .describe("BoG's tender number for the auction that set this rate. An identifier, not a quantity."),
+  securityType: z
+    .string()
+    .describe("Security as published, e.g. \"91 DAY BILL\", \"2 YR FXR NOTE\", \"7 YR FXR BOND\"."),
+  tenorDays: z
+    .number()
+    .optional()
+    .describe("Tenor in days, when the security is quoted in days. Absent for notes and bonds quoted in years."),
+  discountRate: z.number().describe("Discount rate, percent per annum."),
+  interestRate: z.number().describe("Interest rate, percent per annum. The yield most callers want."),
+});
+export type BillRate = z.infer<typeof BillRateSchema>;

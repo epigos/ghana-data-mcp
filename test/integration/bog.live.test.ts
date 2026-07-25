@@ -7,7 +7,10 @@ import {
   BOG_REST_COLLECTIONS,
   BogClient,
 } from "../../src/sources/bog/client.js";
-import { parseInterbankFxPayload } from "../../src/sources/bog/parser.js";
+import {
+  parseBillRatePayload,
+  parseInterbankFxPayload,
+} from "../../src/sources/bog/parser.js";
 
 /**
  * Live canary for the Bank of Ghana source.
@@ -92,6 +95,36 @@ describe.skipIf(!live)("bog.gov.gh (live)", () => {
     expect(Number(payload.recordsFiltered)).toBe(payload.data.length);
     expect(Number(payload.recordsTotal)).toBeGreaterThan(Number(payload.recordsFiltered));
     expect(new Set(payload.data.map((row) => row[0])).size).toBe(1);
+  }, 60_000);
+
+  it("still returns parseable Treasury bill rates for a date window", async () => {
+    const client = new BogClient({ timeoutMs: 30_000, retries: 1 });
+    const { rows, skipped } = parseBillRatePayload(await client.fetchTreasuryBillRates(120));
+
+    expect(skipped).toBe(0);
+    expect(rows.length).toBeGreaterThan(5);
+
+    // The date filter is the point of this test: everything must fall in the window.
+    const oldest = new Date(Date.now() - 130 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    for (const row of rows) expect(row.date >= oldest, `${row.date} outside window`).toBe(true);
+
+    const bill = rows.find((row) => row.tenorDays === 91);
+    expect(bill?.securityType).toBe("91 DAY BILL");
+    // A sanity band, not a forecast: Ghanaian T-bill yields have run 5-40% for
+    // years, so anything outside it means the parser, not the market.
+    expect(bill?.interestRate).toBeGreaterThan(0);
+    expect(bill?.interestRate).toBeLessThan(100);
+  }, 60_000);
+
+  it("still returns parseable Bank of Ghana bill rates", async () => {
+    const client = new BogClient({ timeoutMs: 30_000, retries: 1 });
+    // BoG's own issuance is intermittent, so this needs a wide window to be sure
+    // of finding anything at all.
+    const { rows, skipped } = parseBillRatePayload(await client.fetchCentralBankBillRates(730));
+
+    expect(skipped).toBe(0);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) expect(row.interestRate).toBeGreaterThan(0);
   }, 60_000);
 
   it("serves bog.gov.gh to our identifying User-Agent", async () => {

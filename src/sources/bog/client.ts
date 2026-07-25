@@ -9,6 +9,7 @@ import {
   type ColumnSearch,
   type TableSession,
 } from "../../lib/wpDataTables.js";
+import { MAX_DAYS } from "./types.js";
 
 /**
  * Bank of Ghana upstream access.
@@ -77,6 +78,15 @@ export const FX_COLUMN_NAMES = [
   "vl_bid",
   "vl_offer",
   "vl_mid",
+] as const;
+
+/** Column names for the bill-rate tables (2 and 3), in index order. */
+export const BILL_RATE_COLUMN_NAMES = [
+  "dt_issue_date",
+  "cd_tender_number",
+  "ds_security_type",
+  "vl_discount_rate",
+  "vl_interest_rate",
 ] as const;
 
 /**
@@ -159,6 +169,8 @@ export class BogClient {
     length?: number;
     orderColumn?: number;
     orderDir?: "asc" | "desc";
+    /** The bill tables declare ordered columns; the FX table does not. */
+    orderable?: boolean;
   }): Promise<unknown> {
     const {
       tableId,
@@ -171,6 +183,7 @@ export class BogClient {
       length = -1,
       orderColumn,
       orderDir = "desc",
+      orderable = false,
     } = params;
 
     const body = buildDataTablesBody({
@@ -179,9 +192,7 @@ export class BogClient {
       length,
       orderColumn,
       orderDir,
-      // These tables declare every column non-orderable, matching the page's own
-      // request; sending orderable=true invites a sort the table does not support.
-      orderable: false,
+      orderable,
       rangeSeparator: "|",
       nonce: nonceFor(session, tableId),
     });
@@ -260,18 +271,73 @@ export class BogClient {
     });
   }
 
+  /**
+   * Bill and bond rates from one of the two rate tables, filtered upstream to a
+   * date window.
+   *
+   * Unlike the FX table, these accept a real date-range search on the issue-date
+   * column — in BoG's own `dd MMM yyyy` format, pipe-separated. Table 2 holds 1355
+   * rows back to 2013 and table 3 holds 585 back to 2016, so filtering upstream
+   * rather than fetching everything is worth doing.
+   *
+   * The security-type column is *not* filtered here even though the page's request
+   * offers it: despite `regex=true`, the upstream matches the whole value exactly,
+   * so `364 DAY` finds nothing while `364 DAY BILL` finds 289 rows. That is a sharp
+   * edge to hand a caller, so the parser filters types in memory instead — the
+   * windowed payload is small enough that it costs nothing.
+   */
+  async fetchBillRates(params: {
+    tableId: number;
+    pagePath: string;
+    days: number;
+    now?: Date;
+  }): Promise<unknown> {
+    const { tableId, pagePath, days, now } = params;
+    const boundedDays = Math.min(Math.max(Math.round(days), 1), MAX_DAYS);
+    const range = bogDateRange(boundedDays, now);
+
+    this.logger.info("bog: fetching bill rates", { table: tableId, days: boundedDays, range });
+
+    const session = await this.createSession(pagePath, [tableId]);
+
+    return this.fetchTable({
+      tableId,
+      session,
+      pagePath,
+      columnNames: BILL_RATE_COLUMN_NAMES,
+      columnSearches: { 0: { value: range, regex: false } },
+      // Three securities per weekly tender, so a generous bound on the window.
+      length: Math.min(5000, Math.max(100, boundedDays * 3)),
+      orderColumn: 0,
+      orderDir: "desc",
+      orderable: true,
+    });
+  }
+
   private notImplemented(dataset: string, page: keyof typeof BOG_PAGES): never {
     throw new NotImplementedError(
       `Bank of Ghana ${dataset} is not implemented yet. The data is published at ${this.pageUrl(page)}.`,
     );
   }
 
-  async fetchTreasuryBillRates(): Promise<unknown> {
-    this.notImplemented("treasury bill rates", "treasuryBillRates");
+  /** Government of Ghana Treasury securities (table 2). */
+  async fetchTreasuryBillRates(days: number, now?: Date): Promise<unknown> {
+    return this.fetchBillRates({
+      tableId: BOG_TABLES.treasuryBillRates,
+      pagePath: BOG_PAGES.treasuryBillRates,
+      days,
+      now,
+    });
   }
 
-  async fetchCentralBankBillRates(): Promise<unknown> {
-    this.notImplemented("bill rates", "centralBankBillRates");
+  /** Securities the Bank of Ghana issues itself (table 3). */
+  async fetchCentralBankBillRates(days: number, now?: Date): Promise<unknown> {
+    return this.fetchBillRates({
+      tableId: BOG_TABLES.centralBankBillRates,
+      pagePath: BOG_PAGES.centralBankBillRates,
+      days,
+      now,
+    });
   }
 
   async fetchInterbankInterestRates(): Promise<unknown> {
@@ -289,4 +355,21 @@ export class BogClient {
   async fetchExternalFacilities(): Promise<unknown> {
     this.notImplemented("project administration and external facilities", "externalFacilities");
   }
+}
+
+const MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+] as const;
+
+/** `01 May 2026` — the format BoG's own date filter expects. */
+export function formatBogDate(date: Date): string {
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${day} ${MONTH_NAMES[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}
+
+/** `01 May 2026|25 Jul 2026`, the pipe-separated range the filter expects. */
+export function bogDateRange(days: number, now: Date = new Date()): string {
+  const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+  return `${formatBogDate(start)}|${formatBogDate(now)}`;
 }

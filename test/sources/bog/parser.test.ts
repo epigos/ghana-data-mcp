@@ -2,13 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import { ParseError } from "../../../src/lib/errors.js";
 import {
+  parseBillRatePayload,
   parseBogDate,
   parseInterbankFxPayload,
   parseNumber,
+  parseTenorDays,
 } from "../../../src/sources/bog/parser.js";
 import { fixtureJson } from "../../helpers/fixtures.js";
 
 const fxPayload = fixtureJson<{ data: string[][] }>("bog-interbank-fx.json");
+const tbillPayload = fixtureJson<{ data: string[][] }>("bog-treasury-bill-rates.json");
+const bogBillPayload = fixtureJson<{ data: string[][] }>("bog-central-bank-bill-rates.json");
 
 describe("parseBogDate", () => {
   // BoG writes month names (`dd M yy` per its own table config), where GSE writes
@@ -158,5 +162,119 @@ describe("fixture integrity", () => {
 
   it("holds a single publication date", () => {
     expect(new Set(fxPayload.data.map((row) => row[0])).size).toBe(1);
+  });
+});
+
+describe("parseTenorDays", () => {
+  it("reads a day tenor out of the label", () => {
+    expect(parseTenorDays("91 DAY BILL")).toBe(91);
+    expect(parseTenorDays("364 DAY BILL")).toBe(364);
+    expect(parseTenorDays("14 DAY BILL")).toBe(14);
+  });
+
+  // Converting "2 YR" to days would invent precision BoG does not publish — a
+  // 2-year note is not exactly 730 days and nothing here knows its real maturity.
+  it("returns null for securities quoted in years", () => {
+    expect(parseTenorDays("2 YR FXR NOTE")).toBeNull();
+    expect(parseTenorDays("7 YR FXR BOND")).toBeNull();
+  });
+
+  it("returns null for anything it cannot read", () => {
+    expect(parseTenorDays("")).toBeNull();
+    expect(parseTenorDays("BILL")).toBeNull();
+    expect(parseTenorDays("0 DAY BILL")).toBeNull();
+  });
+});
+
+describe("parseBillRatePayload", () => {
+  it("maps the Treasury fixture onto typed rows", () => {
+    const { rows, skipped } = parseBillRatePayload(tbillPayload);
+
+    expect(skipped).toBe(0);
+    expect(rows).toHaveLength(tbillPayload.data.length);
+  });
+
+  it("reads the columns the bill tables use", () => {
+    const { rows } = parseBillRatePayload(tbillPayload, { securityType: "364 DAY BILL" });
+
+    expect(rows.at(-1)).toEqual({
+      date: "2026-07-20",
+      tenderNumber: "2016",
+      securityType: "364 DAY BILL",
+      tenorDays: 364,
+      discountRate: 11.5008,
+      interestRate: 12.9954,
+    });
+  });
+
+  it("sorts ascending by date, then by security for a stable order", () => {
+    const rows = parseBillRatePayload(tbillPayload).rows;
+    const keys = rows.map((row) => `${row.date} ${row.securityType}`);
+
+    expect(keys).toEqual([...keys].sort());
+  });
+
+  it("matches a security type by prefix, so partial queries work", () => {
+    for (const query of ["91", "91 DAY", "91 DAY BILL", "91 day"]) {
+      const { rows } = parseBillRatePayload(tbillPayload, { securityType: query });
+      expect(rows.length, query).toBeGreaterThan(0);
+      expect(rows.every((row) => row.securityType === "91 DAY BILL"), query).toBe(true);
+    }
+  });
+
+  it("does not count a filtered-out row as malformed", () => {
+    const { rows, skipped } = parseBillRatePayload(tbillPayload, { securityType: "999 DAY" });
+    expect(rows).toEqual([]);
+    expect(skipped).toBe(0);
+  });
+
+  it("handles the central-bank table with the same parser", () => {
+    const { rows, skipped } = parseBillRatePayload(bogBillPayload);
+
+    expect(skipped).toBe(0);
+    expect(rows).toHaveLength(5);
+    expect(rows[0]).toMatchObject({ securityType: "14 DAY BILL", tenorDays: 14 });
+  });
+
+  // Tender numbers arrive with thousands separators (`1,517`). They are
+  // identifiers, so the separator is noise — and a caller matching on the string
+  // should not have to guess whether it is there.
+  it("strips thousands separators from the tender number", () => {
+    const row = [...(tbillPayload.data[0] as string[])];
+    row[1] = "1,517";
+    const { rows } = parseBillRatePayload({ data: [row] });
+
+    expect(rows[0]?.tenderNumber).toBe("1517");
+  });
+
+  it("omits tenorDays for notes and bonds rather than guessing", () => {
+    const row = [...(tbillPayload.data[0] as string[])];
+    row[2] = "7 YR FXR BOND";
+    const { rows } = parseBillRatePayload({ data: [row] });
+
+    expect(rows[0]?.securityType).toBe("7 YR FXR BOND");
+    expect(rows[0]).not.toHaveProperty("tenorDays");
+  });
+
+  it("drops a row missing either rate", () => {
+    const good = tbillPayload.data[0] as string[];
+    for (const index of [3, 4]) {
+      const broken = [...good];
+      broken[index] = "";
+      const { rows, skipped } = parseBillRatePayload({ data: [good, broken] });
+      expect(rows, `column ${index}`).toHaveLength(1);
+      expect(skipped, `column ${index}`).toBe(1);
+    }
+  });
+
+  it("drops rows that are the wrong shape or have an unreadable date", () => {
+    const bad = [...(tbillPayload.data[0] as string[])];
+    bad[0] = "2026-07-20";
+
+    expect(parseBillRatePayload({ data: [bad, ["1"], null] })).toEqual({ rows: [], skipped: 3 });
+  });
+
+  it("throws ParseError when the response is not a table payload", () => {
+    expect(() => parseBillRatePayload({ rates: [] })).toThrow(ParseError);
   });
 });

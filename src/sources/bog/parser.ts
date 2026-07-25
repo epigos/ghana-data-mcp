@@ -1,5 +1,5 @@
 import { ParseError } from "../../lib/errors.js";
-import type { InterbankFxRate } from "./types.js";
+import type { BillRate, InterbankFxRate } from "./types.js";
 
 /**
  * Pure transformation of Bank of Ghana responses. No network, no bindings —
@@ -23,6 +23,23 @@ export const FX_COLUMNS = {
 } as const;
 
 const MIN_FX_ROW_LENGTH = 6;
+
+/**
+ * Column indices for the bill-rate tables (2 and 3), which share one layout:
+ *
+ *   0 dt_issue_date      3 vl_discount_rate
+ *   1 cd_tender_number   4 vl_interest_rate
+ *   2 ds_security_type
+ */
+export const BILL_RATE_COLUMNS = {
+  date: 0,
+  tenderNumber: 1,
+  securityType: 2,
+  discountRate: 3,
+  interestRate: 4,
+} as const;
+
+const MIN_BILL_ROW_LENGTH = 5;
 
 const MONTHS: Readonly<Record<string, number>> = Object.freeze({
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
@@ -156,4 +173,90 @@ function extractDataArray(payload: unknown): unknown[] {
     throw new ParseError("response has no `data` array — the table layout may have changed");
   }
   return data;
+}
+
+/**
+ * Reads a tenor in days out of BoG's security label.
+ *
+ * `91 DAY BILL` → 91. Returns null for anything quoted in years (`2 YR FXR NOTE`),
+ * because converting those to days would invent precision BoG does not publish —
+ * a "2 YR" note is not exactly 730 days and nothing here knows its real maturity.
+ */
+export function parseTenorDays(securityType: string): number | null {
+  const match = /^(\d+)\s*DAY\b/i.exec(securityType.trim());
+  if (!match) return null;
+  const days = Number(match[1]);
+  return Number.isFinite(days) && days > 0 ? days : null;
+}
+
+export interface ParsedBillRates {
+  rows: BillRate[];
+  skipped: number;
+}
+
+export interface ParseBillRateOptions {
+  /**
+   * Restrict to one security. Matched leniently — `91`, `91 DAY` and
+   * `91 DAY BILL` all work, case-insensitively.
+   *
+   * Filtering happens here rather than upstream on purpose: the site's own
+   * security-type search matches the whole value exactly despite advertising
+   * regex, so `364 DAY` silently returns nothing. Doing it in memory lets a caller
+   * say the obvious thing and get the obvious answer.
+   */
+  securityType?: string;
+}
+
+/** Normalizes a bill-rate table into typed rows, ascending by date. */
+export function parseBillRatePayload(
+  payload: unknown,
+  options: ParseBillRateOptions = {},
+): ParsedBillRates {
+  const data = extractDataArray(payload);
+  const wanted = options.securityType?.trim().toUpperCase();
+
+  const rows: BillRate[] = [];
+  let skipped = 0;
+
+  for (const raw of data) {
+    if (!Array.isArray(raw) || raw.length < MIN_BILL_ROW_LENGTH) {
+      skipped++;
+      continue;
+    }
+
+    const date = parseBogDate(raw[BILL_RATE_COLUMNS.date]);
+    const securityType = text(raw[BILL_RATE_COLUMNS.securityType]);
+    if (!date || !securityType) {
+      skipped++;
+      continue;
+    }
+
+    const discountRate = parseNumber(raw[BILL_RATE_COLUMNS.discountRate]);
+    const interestRate = parseNumber(raw[BILL_RATE_COLUMNS.interestRate]);
+    if (discountRate === null || interestRate === null) {
+      skipped++;
+      continue;
+    }
+
+    if (wanted && !securityType.toUpperCase().startsWith(wanted)) continue;
+
+    const tenorDays = parseTenorDays(securityType);
+    // Tender numbers arrive with thousands separators (`1,517`); they are
+    // identifiers, so the separator is noise rather than magnitude.
+    const tenderNumber = text(raw[BILL_RATE_COLUMNS.tenderNumber]).replace(/,/g, "");
+
+    rows.push({
+      date,
+      tenderNumber,
+      securityType,
+      ...(tenorDays !== null ? { tenorDays } : {}),
+      discountRate,
+      interestRate,
+    });
+  }
+
+  rows.sort((a, b) =>
+    a.date === b.date ? a.securityType.localeCompare(b.securityType) : a.date < b.date ? -1 : 1,
+  );
+  return { rows, skipped };
 }
