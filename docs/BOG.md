@@ -15,6 +15,9 @@ Treasury and money-market data published by the Bank of Ghana at
 - [Datasets and tools](#datasets-and-tools)
 - [Blocker: BoG's TLS chain is incomplete](#blocker-bogs-tls-chain-is-incomplete)
 - [What the upstream looks like](#what-the-upstream-looks-like)
+  - [The rate pages](#the-rate-pages-plain-html-tables-not-gse-style-wpdatatables)
+  - [The auction results are PDFs](#the-auction-results-are-pdfs)
+  - [The REST API](#the-rest-api-a-good-index-not-a-data-source)
 - [Implementing a dataset](#implementing-a-dataset)
 - [What the stubs do when called](#what-the-stubs-do-when-called)
 
@@ -154,64 +157,104 @@ a component to maintain.
 
 ### Meanwhile, this is not blocking
 
-The blocker only affects the *last mile* — a live fetch from Workers. Everything
-else can be built and tested now, because the architecture already separates them:
-`parser.ts` is pure and tested against saved fixtures, so payloads captured with
-`curl` (which works, since macOS completes the chain) are enough to write and verify
-the whole parsing layer. When the certificate is fixed, live fetching starts
-working and no parsing code changes.
+The blocker only affects the *last mile* — a live fetch from Workers. The parsing
+layer can be written and verified now, because the architecture already separates
+them: `parser.ts` is pure and fixture-tested, and payloads captured with `curl`
+(which works, since macOS completes the chain) are enough. When the certificate is
+fixed, live fetching starts working and no parsing code changes.
 
 ## What the upstream looks like
 
-bog.gov.gh is WordPress, like gse.com.gh, but it differs in one useful way: it
-exposes a working REST API at `/wp-json/wp/v2/`, with custom post types that line
-up with several of these datasets.
+Surveyed on 2026-07-25. The seven datasets are **not** published the same way, and
+the differences decide how much work each one is.
 
-| REST collection                        | Likely dataset                       |
-| -------------------------------------- | ------------------------------------ |
-| `/wp-json/wp/v2/gog_auction_results`   | GOG T-bill auction results           |
-| `/wp-json/wp/v2/bog_auction_results`   | BOG bill auction results             |
-| `/wp-json/wp/v2/daily_interest_rate`   | Interbank interest rates (daily)     |
-| `/wp-json/wp/v2/avg_interest_rate`     | Interbank interest rates (averaged)  |
-| `/wp-json/wp/v2/exchange_rates`        | Interbank FX rates                   |
+| Dataset                  | Where the figures actually are                          | Difficulty |
+| ------------------------ | ------------------------------------------------------- | ---------- |
+| Treasury bill rates      | HTML table in the page — ~10 most recent rows           | easy       |
+| BOG bill rates           | HTML table in the page                                  | easy       |
+| Interbank interest rates | HTML table in the page                                  | easy       |
+| Interbank FX rates       | Only a weighted average/median summary is in the page    | unclear    |
+| GOG T-bill auctions      | **A PDF per tender**                                    | hard       |
+| BOG bill auctions        | Very likely a PDF per tender too                        | hard       |
+| External facilities      | No table and no PDF in the page — mechanism unknown     | unclear    |
 
-This is a better index than scraping list pages — paginated, date-ordered, and no
-nonce or cookie handshake of the kind gse.com.gh requires.
+### The rate pages: plain HTML tables, not GSE-style wpDataTables
 
-**But it is not a data API.** Probing it on 2026-07-25: `acf` comes back empty and
-the figures live in `content.rendered` as an HTML table. So the REST API replaces
-the *discovery* half of the GSE approach, not the *parsing* half. And
-`exchange_rates` returned an empty array, so FX likely needs a different route.
+An earlier note in this file guessed that the GSE playbook — nonce, then
+`admin-ajax.php?action=get_wdtable` — would transfer. **It does not.** The
+treasury-bill page has no `wdtNonceFrontendEdit_<id>` input at all; the
+`wpDataTable` and `get_wdtable` strings in the markup are the plugin's site-wide
+JavaScript, not a server-side table we can query. There is no nonce to extract and
+no table id to POST.
 
-No REST collection obviously corresponds to the treasury-bill or BOG-bill **rate**
-series — and it turns out they do not need one.
-
-### The rate pages are wpDataTables, like GSE
-
-Fetching `/treasury-and-the-markets/treasury-bill-rates/` on 2026-07-25 shows the
-current data already in the page HTML, in a `wpDataTable` — the same plugin
-gse.com.gh uses, with `admin-ajax` and a nonce present. So the GSE playbook applies:
-the first page comes free with the HTML, and the paginated history very likely comes
-from the same `admin-ajax.php?action=get_wdtable` POST.
-
-Columns, verbatim from the page:
+What the page does give, free with the HTML, is the current data:
 
 | Issue Date  | Tender | Security Type | Discount Rate | Interest Rate |
 | ----------- | ------ | ------------- | ------------- | ------------- |
 | 20 Jul 2026 | 2016   | 364 DAY BILL  | 11.5008       | 12.9954       |
 | 20 Jul 2026 | 2016   | 182 DAY BILL  | 7.3926        | 7.6763        |
 | 20 Jul 2026 | 2016   | 91 DAY BILL   | 5.7020        | 5.7845        |
+| 13 Jul 2026 | 2015   | 364 DAY BILL  | 11.4978       | 12.9915       |
 
-Two things to note before writing the parser:
+Ten rows — roughly the last four weekly tenders across three tenors. BOG bill rates
+follow the same shape at shorter tenors (`14 DAY BILL`), and interbank interest
+rates come as `daily_interest_rate_ID` / `Effective Date` / `Rate (%)`.
 
-- **The date format differs from GSE.** BoG writes `20 Jul 2026`, not `20/07/2026`,
-  so `parseDayFirstDate` from the GSE parser does not apply. This needs its own
-  month-name parser — and it should be strict, not `Date.parse`, for the same
-  reason GSE's is.
-- **Tenor is a string to be interpreted**, not a number: `364 DAY BILL`. Whether to
-  expose it verbatim or as `{ tenorDays: 364 }` is a design call; a numeric field is
-  far more useful for filtering, and unlike GSE's stated-capital column this one is
-  regular enough to parse safely.
+So a "latest rates" tool needs nothing more than this page. **Historical depth is
+the open question**, and it is exactly what a captured network request would answer:
+whatever the page does when you page back or filter by date.
+
+Two things that differ from GSE, for whoever writes the parser:
+
+- **Dates are `20 Jul 2026`**, not `20/07/2026`, so `parseDayFirstDate` from the GSE
+  parser does not apply. This needs its own month-name parser — strict, not
+  `Date.parse`, for the same reasons.
+- **Tenor is a string to interpret**: `364 DAY BILL`. Unlike GSE's stated-capital
+  column this is regular enough to parse safely, and `{ tenorDays: 364 }` is far
+  more useful for filtering than the raw label.
+
+### The auction results are PDFs
+
+This is the one that changes the shape of the work. Each tender is its own post
+whose page contains no table — just a link to a PDF:
+
+```
+https://www.bog.gov.gh/wp-content/uploads/2026/07/Auctresults-2017.pdf
+```
+
+Extracting tabular figures from PDFs inside a Cloudflare Worker is a different and
+much larger job than parsing HTML: no native PDF support, a text-extraction library
+to bundle and stay inside the size limit, and table reconstruction from positioned
+text runs — which is fragile in a way HTML parsing is not.
+
+Worth deciding deliberately rather than drifting into. A reasonable middle path is
+for the auction tools to return the tender list with its PDF URL and publication
+date — genuinely useful, honest about what it is — and leave extraction until
+someone actually needs the numbers machine-readable.
+
+### The REST API: a good index, not a data source
+
+`/wp-json/wp/v2/` is real and open, and the custom post types line up with several
+datasets: `gog_auction_results`, `bog_auction_results`, `daily_interest_rate`,
+`avg_interest_rate`, `exchange_rates`.
+
+But it does not carry the figures:
+
+- **`content.rendered` is empty** on these post types — verified on
+  `daily_interest_rate` and `gog_auction_results`. Not "HTML to parse": zero bytes.
+- **`acf` is empty and `meta` holds only analytics keys.** The values live in
+  JetEngine post meta, which is not registered for REST exposure.
+- **`exchange_rates` returns an empty array** entirely.
+- **There is no BoG data API.** All 18 REST namespaces were enumerated; every custom
+  one belongs to a third-party plugin (Elementor, JetEngine, Contact Form 7,
+  analytics). There is no `bog/v1`.
+
+What the API *is* good for is indexing. For the auction datasets it is the right
+tool: a paginated, date-ordered list of tenders, each with a `link` that resolves to
+its PDF — far better than scraping a list page. It supports `per_page`, `_fields`
+and the standard `after`/`before` date filters.
+
+For the rate series it adds nothing the page does not already give.
 
 ## Implementing a dataset
 
