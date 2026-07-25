@@ -11,21 +11,27 @@ without restructuring anything — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Data sources
 
-| Source                                         | Prefix | Tools | Covers                                          |
-| ---------------------------------------------- | ------ | ----- | ----------------------------------------------- |
-| [Ghana Stock Exchange](docs/GSE.md)            | `gse_` | 3     | Daily share prices, listed-company directory    |
+| Source                              | Prefix | Tools | Covers                                                                                  |
+| ----------------------------------- | ------ | ----- | --------------------------------------------------------------------------------------- |
+| [Ghana Stock Exchange](docs/GSE.md) | `gse_` | 5     | Share prices, company directory, market index, fixed-income issuers                     |
 
-Each source has its own guide with a full tool reference, sample chat queries,
-and the data caveats specific to it. **Start with [docs/GSE.md](docs/GSE.md).**
+Each source has its own guide with a full tool reference, sample chat queries, and
+the data caveats specific to it. **Start with [docs/GSE.md](docs/GSE.md).**
 
 ## Tools
 
-| Tool                                                                      | Returns                                                       |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| [`gse_get_stock_history`](docs/GSE.md#gse_get_stock_history)               | Daily prices and volume for one share code, oldest first      |
-| [`gse_list_companies`](docs/GSE.md#gse_list_companies)                     | Every listed company: share code, name, board, listing date   |
-| [`gse_search_company`](docs/GSE.md#gse_search_company)                     | Best-matching companies for a name, with a confidence score   |
-| [`ping`](docs/GSE.md#ping)                                                 | Health check                                                  |
+| Tool                                                                            | Returns                                                          |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| [`gse_get_stock_history`](docs/GSE.md#gse_get_stock_history)                     | Daily prices and volume for one share code, oldest first         |
+| [`gse_list_companies`](docs/GSE.md#gse_list_companies)                           | Every listed company: share code, name, board, listing date      |
+| [`gse_search_company`](docs/GSE.md#gse_search_company)                           | Best-matching companies for a name, with a confidence score      |
+| [`gse_get_market_index`](docs/GSE.md#gse_get_market_index)                       | Market-wide daily GSE-CI, market cap, GSE-FSI and volume         |
+| [`gse_list_fixed_income_issuers`](docs/GSE.md#gse_list_fixed_income_issuers)     | Corporate bond issuers on the Ghana Fixed Income Market          |
+| [`ping`](docs/GSE.md#ping)                                                       | Health check                                                     |
+
+Equities and debt are kept apart: GFIM issuers have no share code and no price
+history, so they get their own tool rather than being mixed into the company
+directory where `gse_get_stock_history` would appear to fail for them.
 
 Every result carries a `meta.origin` field — `live`, `cache`, `stale-cache`, or
 `static-seed` — plus a `meta.warning` when the data may be behind. Nothing is ever
@@ -180,13 +186,14 @@ Neither workflow needs any secret.
 
 ## Status
 
-Complete: GSE price history, the live company directory across all three boards,
-fuzzy company search, caching, stale and seed fallbacks, rate limiting, logging.
+The GSE source is feature-complete: all six wpDataTables on gse.com.gh are read —
+price history, the company directory across all three boards, the market index,
+and GFIM fixed-income issuers — with fuzzy company search, caching, stale and seed
+fallbacks, rate limiting and logging.
 
-Not implemented: GSE's market-index table and fixed-income issuers are identified
-in the client but unused — they are the obvious next tools. Further sources (Bank
-of Ghana FX rates, Ghana Statistical Service indicators) are what the namespacing
-exists for.
+Further sources (Bank of Ghana FX rates, Ghana Statistical Service indicators) are
+what the namespacing exists for; see [CONTRIBUTING.md](CONTRIBUTING.md) for the
+walkthrough.
 
 ## License
 

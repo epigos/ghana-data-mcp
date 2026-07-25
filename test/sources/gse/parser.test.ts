@@ -8,7 +8,9 @@ import {
   extractSymbols,
   parseCompanyPayload,
   parseDayFirstDate,
+  parseFixedIncomeIssuersPayload,
   parseHistoryPayload,
+  parseMarketIndexPayload,
   parseNumber,
   stripHtml,
 } from "../../../src/sources/gse/parser.js";
@@ -20,6 +22,8 @@ const historyPayload = fixtureJson<{ data: string[][] }>("history-mtngh.json");
 const mainMarketPayload = fixtureJson<{ data: string[][] }>("companies-main-market.json");
 const etfPayload = fixtureJson<{ data: string[][] }>("companies-etf.json");
 const gaxPayload = fixtureJson<{ data: string[][] }>("companies-gax.json");
+const marketIndexPayload = fixtureJson<{ data: string[][] }>("market-index.json");
+const fixedIncomePayload = fixtureJson<{ data: string[][] }>("fixed-income-issuers.json");
 
 describe("extractNonce", () => {
   it("reads the nonce for the requested table", () => {
@@ -344,6 +348,135 @@ describe("parseCompanyPayload", () => {
     const symbols = all.map((company) => company.symbol);
 
     expect(new Set(symbols).size).toBe(symbols.length);
+  });
+});
+
+describe("parseMarketIndexPayload", () => {
+  it("maps the fixture onto typed rows", () => {
+    const { rows, skipped } = parseMarketIndexPayload(marketIndexPayload);
+
+    expect(skipped).toBe(0);
+    expect(rows).toHaveLength(marketIndexPayload.data.length);
+  });
+
+  it("reads the columns the market table actually uses", () => {
+    // Fixture row: ['750','Friday','24/07/2026','3,210,763.00','15,330.57',
+    //               '292,058.49','8,281.03']
+    const { rows } = parseMarketIndexPayload(marketIndexPayload);
+
+    expect(rows.at(-1)).toEqual({
+      date: "2026-07-24",
+      volume: 3_210_763,
+      compositeIndex: 15_330.57,
+      marketCapGhsMillion: 292_058.49,
+      financialStockIndex: 8_281.03,
+    });
+  });
+
+  it("sorts ascending by date", () => {
+    const dates = parseMarketIndexPayload(marketIndexPayload).rows.map((row) => row.date);
+    expect(dates).toEqual([...dates].sort());
+  });
+
+  // Column 1 is the weekday name, which GSE pads inconsistently ("Thursday ").
+  // It is derivable from the date, so it is skipped rather than cleaned.
+  it("ignores the weekday column entirely", () => {
+    const [first] = parseMarketIndexPayload(marketIndexPayload).rows;
+    expect(first).not.toHaveProperty("day");
+    expect(JSON.stringify(first)).not.toMatch(/day/i);
+  });
+
+  it("drops a row missing any index value", () => {
+    const good = marketIndexPayload.data[0] as string[];
+    const noIndex = [...good];
+    noIndex[4] = "";
+
+    const { rows, skipped } = parseMarketIndexPayload({ data: [good, noIndex] });
+    expect(rows).toHaveLength(1);
+    expect(skipped).toBe(1);
+  });
+
+  it("drops rows that are the wrong shape or have an unreadable date", () => {
+    const bad = [...(marketIndexPayload.data[0] as string[])];
+    bad[2] = "not-a-date";
+
+    expect(parseMarketIndexPayload({ data: [bad, ["1", "Mon"], null] })).toEqual({
+      rows: [],
+      skipped: 3,
+    });
+  });
+
+  it("throws ParseError when the response is not a table payload", () => {
+    expect(() => parseMarketIndexPayload({ index: [] })).toThrow(ParseError);
+  });
+});
+
+describe("parseFixedIncomeIssuersPayload", () => {
+  it("maps the fixture onto typed issuers", () => {
+    const { issuers, skipped } = parseFixedIncomeIssuersPayload(fixedIncomePayload);
+
+    expect(skipped).toBe(0);
+    expect(issuers).toHaveLength(14);
+  });
+
+  // These columns are parsed into numbers, unlike the company table's
+  // statedCapital, because GSE writes them cleanly with the unit in the header.
+  it("parses the amounts into numbers", () => {
+    const { issuers } = parseFixedIncomeIssuersPayload(fixedIncomePayload);
+    const esla = issuers.find((issuer) => issuer.name === "ESLA Plc");
+
+    expect(esla).toEqual({
+      name: "ESLA Plc",
+      admittedYear: 2017,
+      tranches: 6,
+      amountRaisedGhsMillion: 10_500,
+      shelfRegistrationGhsMillion: 10_500,
+    });
+  });
+
+  it("strips thousands separators from the amounts", () => {
+    const { issuers } = parseFixedIncomeIssuersPayload(fixedIncomePayload);
+    const cocobod = issuers.find((issuer) => issuer.name === "Ghana Cocoa Board");
+
+    expect(cocobod?.amountRaisedGhsMillion).toBe(3_289.56);
+    expect(cocobod?.shelfRegistrationGhsMillion).toBe(5_500);
+  });
+
+  it("skips a row with no issuer name", () => {
+    const good = fixedIncomePayload.data[0] as string[];
+    const nameless = [...good];
+    nameless[1] = "  ";
+
+    const { issuers, skipped } = parseFixedIncomeIssuersPayload({ data: [good, nameless] });
+    expect(issuers).toHaveLength(1);
+    expect(skipped).toBe(1);
+  });
+
+  it("keeps an issuer whose numeric columns are blank", () => {
+    const sparse = ["1", "Some Issuer Plc", "", "", "", ""];
+    const { issuers, skipped } = parseFixedIncomeIssuersPayload({ data: [sparse] });
+
+    expect(skipped).toBe(0);
+    expect(issuers[0]).toEqual({ name: "Some Issuer Plc" });
+  });
+
+  // A cell that does not hold a plausible year is more likely mislabelled data
+  // than a real admission date.
+  it("omits an implausible admission year", () => {
+    const rows = [
+      ["1", "A Plc", "1899", "1", "1", "1"],
+      ["2", "B Plc", "12", "1", "1", "1"],
+      ["3", "C Plc", "2024", "1", "1", "1"],
+    ];
+    const { issuers } = parseFixedIncomeIssuersPayload({ data: rows });
+
+    expect(issuers[0]).not.toHaveProperty("admittedYear");
+    expect(issuers[1]).not.toHaveProperty("admittedYear");
+    expect(issuers[2]?.admittedYear).toBe(2024);
+  });
+
+  it("throws ParseError when the response is not a table payload", () => {
+    expect(() => parseFixedIncomeIssuersPayload({ issuers: [] })).toThrow(ParseError);
   });
 });
 

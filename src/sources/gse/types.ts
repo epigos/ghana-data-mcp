@@ -68,6 +68,49 @@ export const CompanySchema = z.object({
 });
 export type Company = z.infer<typeof CompanySchema>;
 
+/**
+ * One day of market-wide statistics (table 47).
+ *
+ * Unlike the company table's capital columns, these values are clean and
+ * consistently formatted, so they are parsed into numbers. The unit is baked
+ * into the field name where there is one, because "market cap 292,058" is
+ * meaningless — and off by a factor of a million — without it.
+ */
+export const MarketIndexRowSchema = z.object({
+  date: z.string().describe("Trading date, ISO 8601 (YYYY-MM-DD)."),
+  volume: z.number().describe("Total shares traded across the whole exchange that day."),
+  compositeIndex: z.number().describe("GSE Composite Index (GSE-CI) closing level."),
+  marketCapGhsMillion: z
+    .number()
+    .describe("Total market capitalization in MILLIONS of Ghana cedis. 292058.49 means GHS 292 billion."),
+  financialStockIndex: z.number().describe("GSE Financial Stock Index (GSE-FSI) closing level."),
+});
+export type MarketIndexRow = z.infer<typeof MarketIndexRowSchema>;
+
+/**
+ * A corporate issuer admitted to the Ghana Fixed Income Market (table 37).
+ *
+ * This is debt, not equity: these issuers have listed bonds or notes and have no
+ * share code, so they never appear in the price table or the company directory.
+ */
+export const FixedIncomeIssuerSchema = z.object({
+  name: z.string().describe("Issuer name."),
+  admittedYear: z
+    .number()
+    .optional()
+    .describe("Year the issuer was admitted to GFIM. GSE publishes a year only, not a full date."),
+  tranches: z.number().optional().describe("Number of tranches issued to date."),
+  amountRaisedGhsMillion: z
+    .number()
+    .optional()
+    .describe("Total raised, in MILLIONS of Ghana cedis."),
+  shelfRegistrationGhsMillion: z
+    .number()
+    .optional()
+    .describe("Registered shelf programme size, in MILLIONS of Ghana cedis."),
+});
+export type FixedIncomeIssuer = z.infer<typeof FixedIncomeIssuerSchema>;
+
 export const CompanyMatchSchema = CompanySchema.extend({
   score: z.number().describe("Match confidence from 0 to 1; 1 is an exact symbol match."),
 });

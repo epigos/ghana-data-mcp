@@ -14,12 +14,18 @@ import {
   searchCompanies,
   type CompanyDirectory,
 } from "./companies.js";
-import { parseHistoryPayload } from "./parser.js";
+import {
+  parseFixedIncomeIssuersPayload,
+  parseHistoryPayload,
+  parseMarketIndexPayload,
+} from "./parser.js";
 import {
   CompanyMatchSchema,
   CompanySchema,
   DEFAULT_HISTORY_DAYS,
+  FixedIncomeIssuerSchema,
   MARKET_LABELS,
+  MarketIndexRowSchema,
   MarketSchema,
   MAX_HISTORY_DAYS,
   ResultMetaSchema,
@@ -27,6 +33,10 @@ import {
   type Company,
   type DataOrigin,
 } from "./types.js";
+
+/** GFIM admissions change a few times a year at most. */
+const FIXED_INCOME_CACHE_KEY = "gse:fixed-income-issuers:v1";
+const FIXED_INCOME_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 /**
  * MCP tool surface for the GSE source. Every tool is prefixed `gse_` so a future
@@ -138,6 +148,153 @@ export function registerGseTools(server: McpServer, deps: GseDeps): void {
         });
       } catch (error) {
         log.error("tool: gse_get_stock_history failed", { reason: describeError(error) });
+        return toolError(describeError(error));
+      }
+    },
+  );
+
+  server.registerTool(
+    "gse_get_market_index",
+    {
+      title: "GSE market index history",
+      description:
+        "Daily market-wide statistics for the Ghana Stock Exchange, oldest first: the GSE " +
+        "Composite Index (GSE-CI), the Financial Stock Index, total market capitalization and " +
+        "exchange-wide traded volume. Use this for questions about the market as a whole — " +
+        "'how is the Ghanaian stock market doing' — rather than gse_get_stock_history, which " +
+        "covers one company. Market capitalization is in MILLIONS of cedis.",
+      inputSchema: {
+        days: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_HISTORY_DAYS)
+          .optional()
+          .describe(`Calendar days of history to look back. Default ${DEFAULT_HISTORY_DAYS}.`),
+      },
+      outputSchema: {
+        days: z.number(),
+        rowCount: z.number(),
+        rows: z.array(MarketIndexRowSchema),
+        meta: ResultMetaSchema,
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ days }) => {
+      const requestedDays = days ?? DEFAULT_HISTORY_DAYS;
+      log.info("tool: gse_get_market_index", { days: requestedDays });
+
+      try {
+        const key = `gse:market-index:v1:${requestedDays}`;
+        const ttl = historyTtlSeconds(now());
+        log.debug("cache: lookup", { key, ttlSeconds: ttl });
+
+        const result = await readThrough(deps.cache, key, ttl, async () =>
+          parseMarketIndexPayload(await deps.client.fetchMarketIndex({ days: requestedDays })),
+        );
+
+        const { rows, skipped } = result.value;
+        log.info("tool: gse_get_market_index done", {
+          rows: rows.length,
+          skipped: skipped || undefined,
+          origin: result.origin,
+        });
+
+        const warnings: string[] = [];
+        if (result.origin === "stale-cache") {
+          warnings.push(
+            `gse.com.gh could not be reached (${result.staleReason}); serving a cached copy from ${Math.round(result.ageSeconds / 60)} minutes ago.`,
+          );
+        }
+        if (skipped > 0) {
+          warnings.push(`${skipped} row(s) were dropped because required index values were missing.`);
+        }
+        if (rows.length === 0) {
+          warnings.push(`No market data published in the last ${requestedDays} days.`);
+        }
+
+        return toolResult({
+          days: requestedDays,
+          rowCount: rows.length,
+          rows,
+          meta: {
+            origin: result.origin as DataOrigin,
+            ageSeconds: result.ageSeconds,
+            skippedRows: skipped,
+            ...(warnings.length > 0 ? { warning: warnings.join(" ") } : {}),
+          },
+        });
+      } catch (error) {
+        log.error("tool: gse_get_market_index failed", { reason: describeError(error) });
+        return toolError(describeError(error));
+      }
+    },
+  );
+
+  server.registerTool(
+    "gse_list_fixed_income_issuers",
+    {
+      title: "GSE fixed-income issuers",
+      description:
+        "Corporate issuers admitted to the Ghana Fixed Income Market (GFIM) — companies that " +
+        "have listed bonds or notes, with the year admitted, number of tranches, amount raised " +
+        "and registered shelf size. This is DEBT, not equity: these issuers have no share code " +
+        "and no price history, and they do not appear in gse_list_companies. Amounts are in " +
+        "MILLIONS of cedis.",
+      inputSchema: {
+        refresh: z
+          .boolean()
+          .optional()
+          .describe("Bypass the cache and re-fetch. Rarely needed."),
+      },
+      outputSchema: {
+        issuerCount: z.number(),
+        issuers: z.array(FixedIncomeIssuerSchema),
+        meta: ResultMetaSchema,
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ refresh }) => {
+      log.info("tool: gse_list_fixed_income_issuers", { refresh: refresh ?? false });
+
+      try {
+        const result = await readThrough(
+          deps.cache,
+          FIXED_INCOME_CACHE_KEY,
+          FIXED_INCOME_TTL_SECONDS,
+          async () => parseFixedIncomeIssuersPayload(await deps.client.fetchFixedIncomeIssuers()),
+          { refresh },
+        );
+
+        const { issuers, skipped } = result.value;
+        log.info("tool: gse_list_fixed_income_issuers done", {
+          issuers: issuers.length,
+          skipped: skipped || undefined,
+          origin: result.origin,
+        });
+
+        const warnings: string[] = [];
+        if (result.origin === "stale-cache") {
+          warnings.push(
+            `gse.com.gh could not be reached (${result.staleReason}); serving a cached copy from ${Math.round(result.ageSeconds / 3600)} hour(s) ago.`,
+          );
+        }
+        if (skipped > 0) {
+          warnings.push(`${skipped} row(s) were dropped because the issuer name was missing.`);
+        }
+
+        return toolResult({
+          issuerCount: issuers.length,
+          issuers,
+          meta: {
+            origin: result.origin as DataOrigin,
+            ageSeconds: result.ageSeconds,
+            skippedRows: skipped,
+            ...(warnings.length > 0 ? { warning: warnings.join(" ") } : {}),
+          },
+        });
+      } catch (error) {
+        log.error("tool: gse_list_fixed_income_issuers failed", { reason: describeError(error) });
         return toolError(describeError(error));
       }
     },

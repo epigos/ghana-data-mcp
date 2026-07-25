@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { GseClient, PAGES, TABLE_IDS } from "../../src/sources/gse/client.js";
 import { fetchCompanyDirectory } from "../../src/sources/gse/companies.js";
-import { parseHistoryPayload } from "../../src/sources/gse/parser.js";
+import {
+  parseFixedIncomeIssuersPayload,
+  parseHistoryPayload,
+  parseMarketIndexPayload,
+} from "../../src/sources/gse/parser.js";
 
 /**
  * Live smoke test against gse.com.gh — the canary for upstream markup changes
@@ -49,6 +53,32 @@ describe.skipIf(!live)("gse.com.gh (live)", () => {
     expect(mtn?.name).toMatch(/MTN/i);
     expect(mtn?.market).toBe("main");
   }, 60_000);
+
+  it("returns parseable market-index history", async () => {
+    const { rows } = parseMarketIndexPayload(await client.fetchMarketIndex({ days: 30 }));
+
+    expect(rows.length).toBeGreaterThan(0);
+
+    const latest = rows.at(-1)!;
+    expect(latest.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(latest.compositeIndex).toBeGreaterThan(0);
+    // Market cap is published in millions of cedis; a value below 1,000 would
+    // mean the unit changed and every downstream number is off by 10^6.
+    expect(latest.marketCapGhsMillion).toBeGreaterThan(1_000);
+    expect(rows.map((row) => row.date)).toEqual([...rows.map((row) => row.date)].sort());
+  }, 45_000);
+
+  it("returns parseable GFIM corporate issuers", async () => {
+    const { issuers } = parseFixedIncomeIssuersPayload(await client.fetchFixedIncomeIssuers());
+
+    expect(issuers.length).toBeGreaterThan(5);
+    for (const issuer of issuers) expect(issuer.name).not.toBe("");
+
+    // ESLA Plc is the largest GFIM programme and has been listed since 2017; if
+    // it is missing, the scrape is broken rather than the market having moved.
+    const esla = issuers.find((issuer) => issuer.name.includes("ESLA"));
+    expect(esla?.amountRaisedGhsMillion).toBeGreaterThan(0);
+  }, 45_000);
 
   it("keeps the 7-column layout the company parser assumes", async () => {
     const results = await client.fetchCompanyTables();

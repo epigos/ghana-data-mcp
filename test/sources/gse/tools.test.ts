@@ -6,7 +6,10 @@ import { describe, expect, it } from "vitest";
 import { createCache, createMemoryKV, type Cache } from "../../../src/lib/cache.js";
 import { GseClient } from "../../../src/sources/gse/client.js";
 import { registerGseTools } from "../../../src/sources/gse/tools.js";
-import { StockPriceRowSchema } from "../../../src/sources/gse/types.js";
+import {
+  MarketIndexRowSchema,
+  StockPriceRowSchema,
+} from "../../../src/sources/gse/types.js";
 import { fixture, fixtureJson } from "../../helpers/fixtures.js";
 import { errorResponse, htmlResponse, jsonResponse, stubFetch } from "../../helpers/stubFetch.js";
 
@@ -16,6 +19,8 @@ const historyPayload = fixtureJson("history-mtngh.json");
 const mainMarketPayload = fixtureJson("companies-main-market.json");
 const etfPayload = fixtureJson("companies-etf.json");
 const gaxPayload = fixtureJson("companies-gax.json");
+const marketIndexPayload = fixtureJson("market-index.json");
+const fixedIncomePayload = fixtureJson("fixed-income-issuers.json");
 
 interface Harness {
   client: Client;
@@ -34,6 +39,10 @@ async function harness(
     responses?: Array<() => Response>;
     /** Per-table overrides for the company tables, keyed by table id. */
     companyResponses?: Partial<Record<number, () => Response>>;
+    /** Responses for the market-index table (47). */
+    marketIndexResponses?: Array<() => Response>;
+    /** Responses for the GFIM issuer table (37). */
+    fixedIncomeResponses?: Array<() => Response>;
     cache?: Cache;
   } = {},
 ): Promise<Harness> {
@@ -44,6 +53,14 @@ async function harness(
     { match: "table_id=34", responses: [companies[34] ?? (() => jsonResponse(mainMarketPayload))] },
     { match: "table_id=35", responses: [companies[35] ?? (() => jsonResponse(etfPayload))] },
     { match: "table_id=36", responses: [companies[36] ?? (() => jsonResponse(gaxPayload))] },
+    {
+      match: "table_id=47",
+      responses: options.marketIndexResponses ?? [() => jsonResponse(marketIndexPayload)],
+    },
+    {
+      match: "table_id=37",
+      responses: options.fixedIncomeResponses ?? [() => jsonResponse(fixedIncomePayload)],
+    },
     { match: "admin-ajax.php", responses: options.responses ?? [() => jsonResponse(historyPayload)] },
   ]);
 
@@ -76,7 +93,13 @@ describe("tool registration", () => {
     const { client } = await harness();
     const names = (await client.listTools()).tools.map((tool) => tool.name).sort();
 
-    expect(names).toEqual(["gse_get_stock_history", "gse_list_companies", "gse_search_company"]);
+    expect(names).toEqual([
+      "gse_get_market_index",
+      "gse_get_stock_history",
+      "gse_list_companies",
+      "gse_list_fixed_income_issuers",
+      "gse_search_company",
+    ]);
     // Namespacing is the convention that lets a second source coexist (plan §4).
     expect(names.every((name) => name.startsWith("gse_"))).toBe(true);
   });
@@ -214,6 +237,133 @@ describe("gse_get_stock_history", () => {
   it("rejects a day count outside the supported range at the schema layer", async () => {
     const { client } = await harness();
     const result = await call(client, "gse_get_stock_history", { symbol: "MTNGH", days: 99_999 });
+    expect(result.isError).toBe(true);
+  });
+});
+
+describe("gse_get_market_index", () => {
+  it("returns market-wide rows matching the published schema", async () => {
+    const { client } = await harness();
+    const result = await call(client, "gse_get_market_index", {});
+    const payload = result.structuredContent as {
+      days: number;
+      rowCount: number;
+      rows: unknown[];
+      meta: { origin: string };
+    };
+
+    expect(result.isError).toBeFalsy();
+    expect(payload.days).toBe(90);
+    expect(payload.rowCount).toBe(payload.rows.length);
+    expect(payload.meta.origin).toBe("live");
+    for (const row of payload.rows) expect(() => MarketIndexRowSchema.parse(row)).not.toThrow();
+  });
+
+  it("carries the index levels and market cap through", async () => {
+    const { client } = await harness();
+    const result = await call(client, "gse_get_market_index", { days: 30 });
+    const rows = (result.structuredContent as { rows: Array<Record<string, number>> }).rows;
+
+    expect(rows.at(-1)).toEqual({
+      date: "2026-07-24",
+      volume: 3_210_763,
+      compositeIndex: 15_330.57,
+      marketCapGhsMillion: 292_058.49,
+      financialStockIndex: 8_281.03,
+    });
+  });
+
+  it("caches by day count", async () => {
+    const { client, calls } = await harness();
+
+    await call(client, "gse_get_market_index", { days: 30 });
+    const afterFirst = calls();
+    await call(client, "gse_get_market_index", { days: 30 });
+    expect(calls()).toBe(afterFirst);
+
+    await call(client, "gse_get_market_index", { days: 60 });
+    expect(calls()).toBeGreaterThan(afterFirst);
+  });
+
+  // The index cache must not collide with the price cache, which is keyed on
+  // symbol and days — a bare `days` key would have crossed them.
+  it("does not share a cache entry with the price history tool", async () => {
+    const { client } = await harness();
+
+    await call(client, "gse_get_market_index", { days: 90 });
+    const history = await call(client, "gse_get_stock_history", { symbol: "MTNGH", days: 90 });
+
+    expect(history.structuredContent).toHaveProperty("symbol", "MTNGH");
+    expect(history.structuredContent).not.toHaveProperty("compositeIndex");
+  });
+
+  it("reports an upstream failure as a tool error", async () => {
+    const { client } = await harness({ marketIndexResponses: [() => errorResponse(503)] });
+    const result = await call(client, "gse_get_market_index", {});
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toMatch(/503/);
+  });
+
+  it("rejects a day count outside the supported range", async () => {
+    const { client } = await harness();
+    expect((await call(client, "gse_get_market_index", { days: 99_999 })).isError).toBe(true);
+  });
+});
+
+describe("gse_list_fixed_income_issuers", () => {
+  it("returns the GFIM issuers with their amounts as numbers", async () => {
+    const { client } = await harness();
+    const result = await call(client, "gse_list_fixed_income_issuers", {});
+    const payload = result.structuredContent as {
+      issuerCount: number;
+      issuers: Array<Record<string, unknown>>;
+      meta: { origin: string };
+    };
+
+    expect(result.isError).toBeFalsy();
+    expect(payload.issuerCount).toBe(payload.issuers.length);
+    expect(payload.issuerCount).toBe(14);
+    expect(payload.meta.origin).toBe("live");
+    expect(payload.issuers).toContainEqual({
+      name: "ESLA Plc",
+      admittedYear: 2017,
+      tranches: 6,
+      amountRaisedGhsMillion: 10_500,
+      shelfRegistrationGhsMillion: 10_500,
+    });
+  });
+
+  // These are debt issuers with no share code; mixing them into the equity
+  // directory would make gse_get_stock_history look broken for them.
+  it("keeps fixed-income issuers out of the equity directory", async () => {
+    const { client } = await harness();
+    const companies = (
+      (await call(client, "gse_list_companies")).structuredContent as {
+        companies: Array<{ name: string }>;
+      }
+    ).companies;
+
+    expect(companies.map((company) => company.name)).not.toContain("ESLA Plc");
+    expect(companies.map((company) => company.name)).not.toContain("Ghana Cocoa Board");
+  });
+
+  it("caches, and re-fetches on refresh", async () => {
+    const { client, calls } = await harness();
+
+    await call(client, "gse_list_fixed_income_issuers", {});
+    const afterFirst = calls();
+    await call(client, "gse_list_fixed_income_issuers", {});
+    expect(calls()).toBe(afterFirst);
+
+    await call(client, "gse_list_fixed_income_issuers", { refresh: true });
+    expect(calls()).toBeGreaterThan(afterFirst);
+  });
+
+  it("reports an upstream failure as a tool error", async () => {
+    const { client } = await harness({ fixedIncomeResponses: [() => errorResponse(503)] });
+    const result = await call(client, "gse_list_fixed_income_issuers", {});
+
     expect(result.isError).toBe(true);
   });
 });

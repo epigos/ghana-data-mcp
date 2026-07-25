@@ -1,7 +1,8 @@
 # Ghana Stock Exchange (`gse_*`)
 
-Daily share prices and the listed-company directory, scraped from
-[gse.com.gh](https://gse.com.gh). Four tools, all read-only.
+Share prices, the listed-company directory, market-wide index history, and the
+fixed-income issuer list — scraped from [gse.com.gh](https://gse.com.gh). Six
+tools, all read-only.
 
 Figures in this document were captured on **2026-07-25** and are there to show
 the shape of a response, not as current market data.
@@ -132,6 +133,44 @@ or compute with it. See [free-text fields](#the-capital-and-share-count-fields-a
 `gse_list_companies` and filter on `dateListed`. Note that nine of the forty rows
 have no listing date at all, so the honest answer mentions the gap.
 
+### The market as a whole
+
+> **How is the Ghanaian stock market doing overall this month?**
+
+Calls `gse_get_market_index` — not `gse_get_stock_history`, which only covers one
+company. Over the 21 sessions to 2026-07-24 the GSE Composite Index went
+14,744.72 → 15,330.57, about +4.0%.
+
+> **What's the total market capitalisation of the GSE?**
+
+Same tool, latest row. On 2026-07-24: `marketCapGhsMillion: 292058.49` — that is
+GHS **292 billion**, since the figure is in millions. A good check that the model
+reads the unit off the field name rather than reporting "292,058".
+
+> **Has the Financial Stock Index moved with the main index this year?**
+
+`gse_get_market_index` with a longer `days`. Both series come from the same rows,
+so this needs one call, not two.
+
+### Fixed income
+
+> **Which companies have issued bonds on the Ghana Fixed Income Market?**
+
+Calls `gse_list_fixed_income_issuers`. Expect 14 issuers. These are debt issuers
+with no share code — a model that tries to follow up with
+`gse_get_stock_history` for one of them has misread the tool.
+
+> **Who has raised the most on GFIM, and over how many tranches?**
+
+Same call, sorted on `amountRaisedGhsMillion`. On 2026-07-25: ESLA Plc at GHS
+10,500m over 6 tranches, then Ghana Cocoa Board at GHS 3,289.56m over 3.
+
+> **Is Ghana Cocoa Board listed on the stock exchange?**
+
+A useful trap. It appears in `gse_list_fixed_income_issuers` but *not* in
+`gse_list_companies` — it has listed debt, not equity. The correct answer draws
+that distinction rather than saying yes or no.
+
 ## Tool reference
 
 ### `gse_get_stock_history`
@@ -204,6 +243,60 @@ low score is a hint the match is a guess.
 
 Handled shorthands include `MTN`, `stanchart`, `gcb bank`, `socgen`, `newgold`
 and `first atlantic`.
+
+### `gse_get_market_index`
+
+Market-wide daily statistics, **oldest first**. Use this for the market as a
+whole; `gse_get_stock_history` is per-company.
+
+| Input  | Type   | Notes                                     |
+| ------ | ------ | ----------------------------------------- |
+| `days` | number | Calendar days back. Default 90, max 1825.  |
+
+```json
+{
+  "date": "2026-07-24",
+  "volume": 3210763,
+  "compositeIndex": 15330.57,
+  "marketCapGhsMillion": 292058.49,
+  "financialStockIndex": 8281.03
+}
+```
+
+| Field                 | Meaning                                                        |
+| --------------------- | -------------------------------------------------------------- |
+| `volume`              | Shares traded across the whole exchange that day               |
+| `compositeIndex`      | GSE Composite Index (GSE-CI) closing level                     |
+| `marketCapGhsMillion` | Total market cap in **millions** of GHS. 292058.49 = GHS 292bn |
+| `financialStockIndex` | GSE Financial Stock Index (GSE-FSI) closing level              |
+
+Unlike the company table's capital columns, these are clean numbers with the unit
+declared in the column header, so they are parsed rather than passed through as
+text.
+
+### `gse_list_fixed_income_issuers`
+
+Corporate issuers admitted to the **Ghana Fixed Income Market** (GFIM). This is
+debt, not equity: these issuers have no share code, no price history, and they do
+not appear in `gse_list_companies`.
+
+| Input     | Type    | Notes                                  |
+| --------- | ------- | -------------------------------------- |
+| `refresh` | boolean | Bypass the 7-day cache. Rarely needed. |
+
+```json
+{
+  "name": "ESLA Plc",
+  "admittedYear": 2017,
+  "tranches": 6,
+  "amountRaisedGhsMillion": 10500,
+  "shelfRegistrationGhsMillion": 10500
+}
+```
+
+Everything after `name` is optional. `admittedYear` is a year only — GSE does not
+publish a full admission date — and is omitted when the value is not a plausible
+year. Both amounts are in **millions** of GHS.
 
 ### `ping`
 
@@ -289,6 +382,11 @@ and has a row in the price table, but its price fields are empty, so the row is
 dropped and `meta.skippedRows` reports it. This is missing data upstream, not a
 bug. Use `SCB` for Standard Chartered prices.
 
+**A company you know exists is not in the directory.** It may be a *debt* issuer
+rather than a listed equity. Ghana Cocoa Board and ESLA Plc, for instance, appear
+only in `gse_list_fixed_income_issuers` — they have listed bonds, no shares, and so
+no share code and no price history.
+
 **Results are labelled `static-seed`.** The live directory scrape failed and you
 are seeing the built-in fallback — 32 Main Market companies as of 2026-07-25, with
 no GAX companies and no ETFs. `meta.warning` carries the reason. If this persists,
@@ -317,6 +415,10 @@ a convenience, and it dates.
 
 **Exchange Traded Fund (1)** — `GLD`
 
+GFIM fixed-income issuers are deliberately absent: they have no share code, so
+there is nothing here to look a price up by. Use
+`gse_list_fixed_income_issuers` for those.
+
 ## How the scrape works
 
 gse.com.gh is a WordPress site using wpDataTables, with no documented API, so the
@@ -328,19 +430,23 @@ client reproduces what the page's own JavaScript does:
 
 Neither step is optional; without the cookie/nonce pair the endpoint refuses.
 
-Two pages carry six tables:
+Two pages carry six tables, all of which are now read:
 
-| Page                 | Table | Contents                           | Used | Tool                    |
-| -------------------- | ----- | ---------------------------------- | ---- | ----------------------- |
-| `/trading-and-data/` | 39    | Daily share prices                 | yes  | `gse_get_stock_history` |
-| `/trading-and-data/` | 47    | GSE Composite Index, market cap    | no   | –                       |
-| `/listed-companies/` | 34    | Main Market companies              | yes  | `gse_list_companies`    |
-| `/listed-companies/` | 35    | Exchange Traded Funds              | yes  | `gse_list_companies`    |
-| `/listed-companies/` | 36    | Ghana Alternative Market companies | yes  | `gse_list_companies`    |
-| `/listed-companies/` | 37    | Fixed-income corporate issuers     | no   | –                       |
+| Page                 | Table | Contents                           | Tool                            |
+| -------------------- | ----- | ---------------------------------- | ------------------------------- |
+| `/trading-and-data/` | 39    | Daily share prices                 | `gse_get_stock_history`         |
+| `/trading-and-data/` | 47    | GSE-CI, market cap, GSE-FSI        | `gse_get_market_index`          |
+| `/listed-companies/` | 34    | Main Market companies              | `gse_list_companies`            |
+| `/listed-companies/` | 35    | Exchange Traded Funds              | `gse_list_companies`            |
+| `/listed-companies/` | 36    | Ghana Alternative Market companies | `gse_list_companies`            |
+| `/listed-companies/` | 37    | Fixed-income corporate issuers     | `gse_list_fixed_income_issuers` |
 
 Nonces are per-table but issued per page load, so the three-table directory scrape
 costs one page fetch, not three.
+
+The two date-filtered tables do **not** agree on which column carries the range:
+it is column 1 on the price table and column 2 on the market-index table. Getting
+that wrong returns the entire history instead of the window asked for, silently.
 
 Reading all three company tables matters: the Main Market table alone misses six
 tradeable symbols that *do* appear in the price table, so a caller could otherwise
@@ -357,13 +463,17 @@ look up history for a company the directory never mentioned.
   the content type is never worth checking.
 - The share-code search is a substring regex server-side, so a query for `SCB` can
   also match `SCB PREF`; the parser narrows it to an exact match afterwards.
+- The market-index table has a weekday-name column whose values are inconsistently
+  padded (`"Thursday "`). It is skipped — the date already carries that.
 
 ### Caching
 
-| Key                              | Fresh for                               |
-| -------------------------------- | --------------------------------------- |
-| `gse:companies:v1`               | 7 days                                  |
-| `gse:history:v1:{symbol}:{days}` | 15 min during GSE hours, 12 h otherwise |
+| Key                                 | Fresh for                               |
+| ----------------------------------- | --------------------------------------- |
+| `gse:companies:v1`                  | 7 days                                  |
+| `gse:fixed-income-issuers:v1`       | 7 days                                  |
+| `gse:history:v1:{symbol}:{days}`    | 15 min during GSE hours, 12 h otherwise |
+| `gse:market-index:v1:{days}`        | 15 min during GSE hours, 12 h otherwise |
 
 GSE trades weekdays, roughly 09:30–15:30 GMT (Ghana keeps GMT year-round). Outside
 that window the day's rows are settled, so the longer TTL applies.

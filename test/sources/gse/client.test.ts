@@ -29,6 +29,8 @@ const historyPayload = fixtureJson("history-mtngh.json");
 const mainMarketPayload = fixtureJson("companies-main-market.json");
 const etfPayload = fixtureJson("companies-etf.json");
 const gaxPayload = fixtureJson("companies-gax.json");
+const marketIndexPayload = fixtureJson("market-index.json");
+const fixedIncomePayload = fixtureJson("fixed-income-issuers.json");
 
 /** No real backoff in tests; retries should be exercised, not waited on. */
 const fast = { baseDelayMs: 0 };
@@ -244,6 +246,76 @@ describe("GseClient.createSession", () => {
 
     await expect(priceSession(fetchImpl)).rejects.toThrow(/returned 404/);
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe("GseClient.fetchMarketIndex", () => {
+  function indexStub() {
+    return stubFetch([
+      { match: "/trading-and-data/", responses: [() => htmlResponse(tradingPageHtml)] },
+      { match: "table_id=47", responses: [() => jsonResponse(marketIndexPayload)] },
+    ]);
+  }
+
+  it("handshakes on the trading page and queries table 47", async () => {
+    const { fetch: fetchImpl, calls } = indexStub();
+    const payload = await client(fetchImpl).fetchMarketIndex({ days: 90 });
+
+    expect(payload).toEqual(marketIndexPayload);
+    expect(calls[1]?.url).toContain("table_id=47");
+    expect(formOf(calls[1]!)["wdtNonce"]).toBe("ecee03bd2a"); // table 47's own nonce
+  });
+
+  // The price table filters dates on column 1; this one on column 2. Getting it
+  // wrong returns the whole 749-row history instead of the window asked for.
+  it("puts the date range on column 2, not column 1", async () => {
+    const { fetch: fetchImpl, calls } = indexStub();
+    await client(fetchImpl).fetchMarketIndex({ days: 30 });
+
+    const form = formOf(calls[1]!);
+    expect(form["columns[2][search][value]"]).toMatch(/^\d{2}\/\d{2}\/\d{4}\|\d{2}\/\d{2}\/\d{4}$/);
+    expect(form["columns[1][search][value]"]).toBe("");
+    expect(form["columns[2][name]"]).toBe("date");
+    expect(form["order[0][column]"]).toBe("2");
+    expect(form["sRangeSeparator"]).toBe("|");
+  });
+
+  it("clamps an absurd day count", async () => {
+    const { fetch: fetchImpl, calls } = indexStub();
+    await client(fetchImpl).fetchMarketIndex({ days: 100_000 });
+
+    expect(Number(formOf(calls[1]!)["length"])).toBeLessThanOrEqual(2000);
+  });
+});
+
+describe("GseClient.fetchFixedIncomeIssuers", () => {
+  function gfimStub() {
+    return stubFetch([
+      { match: "/listed-companies/", responses: [() => htmlResponse(listedCompaniesHtml)] },
+      { match: "table_id=37", responses: [() => jsonResponse(fixedIncomePayload)] },
+    ]);
+  }
+
+  it("handshakes on the listed-companies page and queries table 37", async () => {
+    const { fetch: fetchImpl, calls } = gfimStub();
+    const payload = await client(fetchImpl).fetchFixedIncomeIssuers();
+
+    expect(payload).toEqual(fixedIncomePayload);
+    expect(calls[1]?.url).toContain("table_id=37");
+    expect(formOf(calls[1]!)["wdtNonce"]).toBe("40d6e4ec79");
+    expect(calls[1]?.headers.get("referer")).toContain("/listed-companies/");
+  });
+
+  it("declares the GFIM column names and no date filter", async () => {
+    const { fetch: fetchImpl, calls } = gfimStub();
+    await client(fetchImpl).fetchFixedIncomeIssuers();
+
+    const form = formOf(calls[1]!);
+    expect(form["columns[1][name]"]).toBe("nameofissuer");
+    expect(form["columns[5][name]"]).toBe("shelfregistration");
+    expect(form["columns[6][name]"]).toBeUndefined();
+    // No range filter on this table, so no separator for one.
+    expect(form["sRangeSeparator"]).toBeUndefined();
   });
 });
 

@@ -31,7 +31,7 @@ export const PAGES = {
 export const TABLE_IDS = {
   /** trading-and-data: daily share prices, one row per share code per day. */
   dailyPrices: 39,
-  /** trading-and-data: GSE Composite Index, market capitalization, volume. */
+  /** trading-and-data: GSE Composite Index, market capitalization, market-wide volume. */
   marketIndex: 47,
   /** listed-companies: Main Market companies. */
   mainMarket: 34,
@@ -40,9 +40,9 @@ export const TABLE_IDS = {
   /** listed-companies: Ghana Alternative Market companies. */
   gax: 36,
   /**
-   * listed-companies: Ghana Fixed Income Market corporate issuers. Not read —
-   * it has a different layout (issuer, tranches, amount raised) and no share
-   * codes, so it does not belong in an equity directory.
+   * listed-companies: Ghana Fixed Income Market corporate issuers. Deliberately
+   * excluded from the company directory — these are debt issuers with no share
+   * code, so they belong in their own tool, not mixed in with equities.
    */
   gfimCorporate: 37,
 } as const;
@@ -340,6 +340,53 @@ export class GseClient {
 
     return results;
   }
+
+  /**
+   * Market-wide daily statistics: the GSE Composite Index, total market
+   * capitalization, the Financial Stock Index and exchange-wide volume.
+   *
+   * Same page and handshake as the price table, but a different table id — and
+   * note the date filter sits on column 2 here, not column 1.
+   */
+  async fetchMarketIndex({ days }: { days: number }): Promise<unknown> {
+    const boundedDays = Math.min(Math.max(Math.round(days), 1), MAX_HISTORY_DAYS);
+    this.logger.info("gse: fetching market index", { days: boundedDays });
+
+    const session = await this.createSession(PAGES.tradingAndData, [TABLE_IDS.marketIndex]);
+
+    return this.fetchTable({
+      tableId: TABLE_IDS.marketIndex,
+      session,
+      pagePath: PAGES.tradingAndData,
+      columnNames: MARKET_INDEX_COLUMN_NAMES,
+      rangeSeparator: "|",
+      columnSearches: {
+        2: { value: dateRange(boundedDays), regex: false },
+      },
+      // One row per trading day for the whole market, so `days` is a safe bound.
+      length: Math.min(2000, Math.max(100, boundedDays)),
+      orderColumn: 2,
+      orderDir: "desc",
+    });
+  }
+
+  /** Corporate issuers admitted to the Ghana Fixed Income Market. */
+  async fetchFixedIncomeIssuers(): Promise<unknown> {
+    this.logger.info("gse: fetching fixed-income issuers");
+
+    const session = await this.createSession(PAGES.listedCompanies, [TABLE_IDS.gfimCorporate]);
+
+    return this.fetchTable({
+      tableId: TABLE_IDS.gfimCorporate,
+      session,
+      pagePath: PAGES.listedCompanies,
+      columnNames: FIXED_INCOME_COLUMN_NAMES,
+      // Fourteen issuers as of 2026-07-25; 500 is headroom without being rude.
+      length: 500,
+      orderColumn: 0,
+      orderDir: "asc",
+    });
+  }
 }
 
 /**
@@ -382,6 +429,27 @@ export const COMPANY_COLUMN_NAMES = [
   "statedcapital",
   "issuedshares",
   "authorisedshares",
+] as const;
+
+/** Column names for the market-summary table (47), in index order. */
+export const MARKET_INDEX_COLUMN_NAMES = [
+  "wdt_ID",
+  "day",
+  "date",
+  "volume",
+  "gseci",
+  "marketcap",
+  "financialstockindex",
+] as const;
+
+/** Column names for the GFIM corporate-issuer table (37), in index order. */
+export const FIXED_INCOME_COLUMN_NAMES = [
+  "wdt_ID",
+  "nameofissuer",
+  "admittedongfim",
+  "numberoftranches",
+  "amountraised",
+  "shelfregistration",
 ] as const;
 
 /** GSE searches share codes as a regex; keep only characters real codes use. */

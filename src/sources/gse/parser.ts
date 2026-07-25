@@ -1,7 +1,13 @@
 import { parseHTML } from "linkedom";
 
 import { ParseError, UpstreamError } from "../../lib/errors.js";
-import type { Company, Market, StockPriceRow } from "./types.js";
+import type {
+  Company,
+  FixedIncomeIssuer,
+  Market,
+  MarketIndexRow,
+  StockPriceRow,
+} from "./types.js";
 
 /**
  * Pure transformation of what gse.com.gh sends back. No network, no bindings —
@@ -53,6 +59,42 @@ export const COMPANY_COLUMNS = {
 } as const;
 
 const MIN_COMPANY_ROW_LENGTH = 7;
+
+/**
+ * Column indices for the market-summary table (47):
+ *
+ *   0 wdt_ID    3 Volume                       5 Market Capitalization (GH¢ million)
+ *   1 Day       4 GSE Composite Index (GSE-CI) 6 Financial Stock Index
+ *   2 Date
+ *
+ * Column 1 (the weekday name) is skipped: it is derivable from the date, and
+ * GSE's own values are inconsistently padded (`"Thursday "`).
+ */
+export const MARKET_INDEX_COLUMNS = {
+  date: 2,
+  volume: 3,
+  compositeIndex: 4,
+  marketCapGhsMillion: 5,
+  financialStockIndex: 6,
+} as const;
+
+const MIN_MARKET_INDEX_ROW_LENGTH = 7;
+
+/**
+ * Column indices for the GFIM corporate-issuer table (37):
+ *
+ *   0 wdt_ID           2 Admitted on GFIM     4 Amount Raised (GHS Million)
+ *   1 Name Of Issuer   3 Number Of Tranches   5 Shelf Registration (GHS Million)
+ */
+export const FIXED_INCOME_COLUMNS = {
+  name: 1,
+  admittedYear: 2,
+  tranches: 3,
+  amountRaisedGhsMillion: 4,
+  shelfRegistrationGhsMillion: 5,
+} as const;
+
+const MIN_FIXED_INCOME_ROW_LENGTH = 6;
 
 /**
  * Pulls the wpDataTables edit nonce out of the page. The nonce is per-table, so
@@ -300,6 +342,112 @@ export function parseCompanyPayload(payload: unknown, market: Market): ParsedCom
   }
 
   return { companies, skipped };
+}
+
+export interface ParsedMarketIndex {
+  rows: MarketIndexRow[];
+  skipped: number;
+}
+
+/**
+ * Normalizes the market-summary table into typed rows, ascending by date.
+ *
+ * Every numeric column is required here — unlike the company table, a row with a
+ * missing index level is not partially useful, it is just noise on a chart.
+ */
+export function parseMarketIndexPayload(payload: unknown): ParsedMarketIndex {
+  const data = extractDataArray(payload);
+
+  const rows: MarketIndexRow[] = [];
+  let skipped = 0;
+
+  for (const raw of data) {
+    if (!Array.isArray(raw) || raw.length < MIN_MARKET_INDEX_ROW_LENGTH) {
+      skipped++;
+      continue;
+    }
+
+    const date = parseDayFirstDate(stripHtml(raw[MARKET_INDEX_COLUMNS.date]));
+    if (!date) {
+      skipped++;
+      continue;
+    }
+
+    const numbers = {
+      volume: parseNumber(raw[MARKET_INDEX_COLUMNS.volume]),
+      compositeIndex: parseNumber(raw[MARKET_INDEX_COLUMNS.compositeIndex]),
+      marketCapGhsMillion: parseNumber(raw[MARKET_INDEX_COLUMNS.marketCapGhsMillion]),
+      financialStockIndex: parseNumber(raw[MARKET_INDEX_COLUMNS.financialStockIndex]),
+    };
+
+    if (Object.values(numbers).some((value) => value === null)) {
+      skipped++;
+      continue;
+    }
+
+    rows.push({
+      date,
+      volume: numbers.volume as number,
+      compositeIndex: numbers.compositeIndex as number,
+      marketCapGhsMillion: numbers.marketCapGhsMillion as number,
+      financialStockIndex: numbers.financialStockIndex as number,
+    });
+  }
+
+  rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  return { rows, skipped };
+}
+
+export interface ParsedFixedIncomeIssuers {
+  issuers: FixedIncomeIssuer[];
+  skipped: number;
+}
+
+/**
+ * Normalizes the GFIM corporate-issuer table.
+ *
+ * Only the issuer name is required. The numeric columns *are* parsed into numbers
+ * here — in contrast to the company table's `statedCapital`, which stays a string
+ * — because these arrive clean and consistently formatted (`10,500.00`, `1,200`)
+ * with the unit declared in the column header rather than embedded per-value.
+ */
+export function parseFixedIncomeIssuersPayload(payload: unknown): ParsedFixedIncomeIssuers {
+  const data = extractDataArray(payload);
+
+  const issuers: FixedIncomeIssuer[] = [];
+  let skipped = 0;
+
+  for (const raw of data) {
+    if (!Array.isArray(raw) || raw.length < MIN_FIXED_INCOME_ROW_LENGTH) {
+      skipped++;
+      continue;
+    }
+
+    const name = stripHtml(raw[FIXED_INCOME_COLUMNS.name]);
+    if (!name) {
+      skipped++;
+      continue;
+    }
+
+    const admittedYear = parseNumber(raw[FIXED_INCOME_COLUMNS.admittedYear]);
+    const tranches = parseNumber(raw[FIXED_INCOME_COLUMNS.tranches]);
+    const amountRaised = parseNumber(raw[FIXED_INCOME_COLUMNS.amountRaisedGhsMillion]);
+    const shelf = parseNumber(raw[FIXED_INCOME_COLUMNS.shelfRegistrationGhsMillion]);
+
+    issuers.push({
+      name,
+      // A year outside this range means the cell holds something other than the
+      // year it claims to, so it is better omitted than reported.
+      ...(admittedYear !== null && admittedYear >= 1990 && admittedYear <= 2100
+        ? { admittedYear }
+        : {}),
+      ...(tranches !== null ? { tranches } : {}),
+      ...(amountRaised !== null ? { amountRaisedGhsMillion: amountRaised } : {}),
+      ...(shelf !== null ? { shelfRegistrationGhsMillion: shelf } : {}),
+    });
+  }
+
+  return { issuers, skipped };
 }
 
 /** Distinct share codes present in a payload, sorted. Used to seed the directory. */
