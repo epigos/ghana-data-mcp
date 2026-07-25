@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { Env } from "./env.js";
 import { createCache } from "./lib/cache.js";
+import { createLogger, debugEnabled } from "./lib/log.js";
 import { SERVER_NAME, SERVER_VERSION } from "./meta.js";
 import { GseClient } from "./sources/gse/client.js";
 import { registerGseTools } from "./sources/gse/tools.js";
@@ -26,6 +27,9 @@ export function createServer(env: Env): McpServer {
     },
   );
 
+  // `info` and above always emit; set the DEBUG var to "1" for request bodies,
+  // nonces, retry delays and cache keys.
+  const logger = createLogger({ debug: debugEnabled(env.DEBUG) });
   const cache = createCache(env.GSE_CACHE);
 
   server.registerTool(
@@ -47,8 +51,9 @@ export function createServer(env: Env): McpServer {
   );
 
   registerGseTools(server, {
-    client: new GseClient({ timeoutMs: 15_000, retries: 2 }),
+    client: new GseClient({ timeoutMs: 15_000, retries: 2, logger }),
     cache,
+    logger,
   });
 
   return server;

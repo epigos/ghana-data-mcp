@@ -149,6 +149,43 @@ makes the stale fallback work: when a scrape fails and an expired copy is on
 hand, the copy is served with `origin: "stale-cache"` and a warning, rather than
 failing the call.
 
+### Logging
+
+Every outbound request is logged, because `lib/http.ts` is the single choke point
+for network traffic — no source can reach the internet unobserved. Workers routes
+`console.*` into Workers Logs, so there is nothing to configure.
+
+Two levels, split by what they cost:
+
+- **`info` and above are always on.** One line per upstream request is cheap,
+  since the cache absorbs the repeats, and it is the first thing you want when a
+  tool misbehaves.
+- **`debug` needs `DEBUG = "1"`** in `wrangler.toml` (or `wrangler dev --var
+  DEBUG:1`). This is the noisy detail: request bodies, nonces, cache keys, retry
+  delays.
+
+A cache hit is visible by its absence of HTTP lines:
+
+```
+info  | tool: gse_get_stock_history | source=gse symbol=GCB days=14
+info  | gse: fetching stock history | source=gse symbol=GCB days=14
+info  | http: response | source=gse method=GET label="GET /trading-and-data/" status=200 ms=897 attempt=1
+info  | gse: session created | source=gse page=/trading-and-data/ tables=39 htmlBytes=196440
+info  | http: response | source=gse method=POST label="POST admin-ajax.php (table 39)" status=200 ms=470 attempt=1
+info  | gse: table fetched | source=gse table=39 rows=10 recordsTotal=183595 recordsFiltered=10
+info  | tool: gse_get_stock_history done | source=gse symbol=GCB rows=10 origin=live ageSeconds=0
+
+info  | tool: gse_get_stock_history | source=gse symbol=GCB days=14
+info  | tool: gse_get_stock_history done | source=gse symbol=GCB rows=10 origin=cache ageSeconds=0
+```
+
+Every line carries `source=gse`, so a second data source stays greppable apart.
+
+**Cookies are never logged** — `__cf_bm` is a session token, so the request line
+records only `cookies=yes|no`, and the debug line lists cookie *names*. Nonces
+*are* logged: they come from the public page HTML, are scoped to one page load,
+and are exactly what you need to diagnose a rejected POST.
+
 ### Being a good citizen upstream
 
 - A descriptive `User-Agent` that names the project and links to this repo.

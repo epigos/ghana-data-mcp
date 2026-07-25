@@ -42,7 +42,7 @@ export function registerTemplateTools(server: McpServer, deps: TemplateDeps): vo
     async ({ id }) => {
       try {
         const result = await readThrough(deps.cache, `${NAMESPACE}:something:v1:${id}`, TTL_SECONDS, async () =>
-          parseTemplatePayload(await deps.client.fetchSomething()),
+          parseTemplatePayload(await deps.client.fetchSomething(id)),
         );
 
         const payload = {

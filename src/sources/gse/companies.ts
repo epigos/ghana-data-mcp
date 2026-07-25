@@ -1,4 +1,5 @@
 import { UpstreamError } from "../../lib/errors.js";
+import { silentLogger, type Logger } from "../../lib/log.js";
 import type { GseClient } from "./client.js";
 import { parseCompanyPayload } from "./parser.js";
 import type { Company, CompanyMatch } from "./types.js";
@@ -84,7 +85,10 @@ export interface CompanyDirectory {
  * no directory. If *every* table fails, that is an upstream failure and throws,
  * which lets the caller fall back to cache or seed.
  */
-export async function fetchCompanyDirectory(client: GseClient): Promise<CompanyDirectory> {
+export async function fetchCompanyDirectory(
+  client: GseClient,
+  logger: Logger = silentLogger,
+): Promise<CompanyDirectory> {
   const results = await client.fetchCompanyTables();
 
   const companies: Company[] = [];
@@ -98,10 +102,18 @@ export async function fetchCompanyDirectory(client: GseClient): Promise<CompanyD
     }
     try {
       const parsed = parseCompanyPayload(result.payload, result.market);
+      logger.debug("gse: company table parsed", {
+        market: result.market,
+        companies: parsed.companies.length,
+        skipped: parsed.skipped || undefined,
+      });
       companies.push(...parsed.companies);
       skipped += parsed.skipped;
     } catch (error) {
-      console.warn(`gse: could not parse the ${result.market} company table`, error);
+      logger.warn("gse: could not parse company table", {
+        market: result.market,
+        reason: error instanceof Error ? error.message : String(error),
+      });
       failedMarkets.push(result.market);
     }
   }

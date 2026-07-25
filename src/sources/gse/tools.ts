@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { readThrough, type Cache } from "../../lib/cache.js";
 import { describeError } from "../../lib/errors.js";
+import { silentLogger, type Logger } from "../../lib/log.js";
 import { historyTtlSeconds } from "../../lib/tradingHours.js";
 import { GseClient, sanitizeSymbol } from "./client.js";
 import {
@@ -36,11 +37,13 @@ import {
 export interface GseDeps {
   client: GseClient;
   cache: Cache;
+  logger?: Logger;
   now?: () => Date;
 }
 
 export function registerGseTools(server: McpServer, deps: GseDeps): void {
   const now = deps.now ?? (() => new Date());
+  const log = (deps.logger ?? silentLogger).child({ source: "gse" });
 
   server.registerTool(
     "gse_get_stock_history",
@@ -83,22 +86,29 @@ export function registerGseTools(server: McpServer, deps: GseDeps): void {
         );
       }
 
+      log.info("tool: gse_get_stock_history", { symbol: normalizedSymbol, days: requestedDays });
+
       try {
         const key = `gse:history:v1:${normalizedSymbol}:${requestedDays}`;
-        const result = await readThrough(
-          deps.cache,
-          key,
-          historyTtlSeconds(now()),
-          async () => {
-            const payload = await deps.client.fetchStockHistory({
-              symbol: normalizedSymbol,
-              days: requestedDays,
-            });
-            return parseHistoryPayload(payload, { symbol: normalizedSymbol });
-          },
-        );
+        const ttl = historyTtlSeconds(now());
+        log.debug("cache: lookup", { key, ttlSeconds: ttl });
+
+        const result = await readThrough(deps.cache, key, ttl, async () => {
+          const payload = await deps.client.fetchStockHistory({
+            symbol: normalizedSymbol,
+            days: requestedDays,
+          });
+          return parseHistoryPayload(payload, { symbol: normalizedSymbol });
+        });
 
         const { rows, skipped } = result.value;
+        log.info("tool: gse_get_stock_history done", {
+          symbol: normalizedSymbol,
+          rows: rows.length,
+          skipped: skipped || undefined,
+          origin: result.origin,
+          ageSeconds: result.ageSeconds,
+        });
         const warnings: string[] = [];
         if (result.origin === "stale-cache") {
           warnings.push(
@@ -127,7 +137,7 @@ export function registerGseTools(server: McpServer, deps: GseDeps): void {
           },
         });
       } catch (error) {
-        console.error("gse_get_stock_history failed", error);
+        log.error("tool: gse_get_stock_history failed", { reason: describeError(error) });
         return toolError(describeError(error));
       }
     },
@@ -176,7 +186,7 @@ export function registerGseTools(server: McpServer, deps: GseDeps): void {
           meta: mergeWarning(loaded.meta, emptyNote),
         });
       } catch (error) {
-        console.error("gse_list_companies failed", error);
+        log.error("tool: gse_list_companies failed", { reason: describeError(error) });
         return toolError(describeError(error));
       }
     },
@@ -217,7 +227,7 @@ export function registerGseTools(server: McpServer, deps: GseDeps): void {
           meta: mergeWarning(meta, noMatchNote),
         });
       } catch (error) {
-        console.error("gse_search_company failed", error);
+        log.error("tool: gse_search_company failed", { reason: describeError(error) });
         return toolError(describeError(error));
       }
     },
@@ -238,16 +248,32 @@ async function loadCompanies(
   deps: GseDeps,
   options: { refresh?: boolean },
 ): Promise<{ companies: Company[]; meta: z.infer<typeof ResultMetaSchema> }> {
+  const log = (deps.logger ?? silentLogger).child({ source: "gse" });
+
   try {
+    log.debug("cache: lookup", {
+      key: COMPANIES_CACHE_KEY,
+      ttlSeconds: COMPANIES_TTL_SECONDS,
+      refresh: options.refresh ?? false,
+    });
+
     const result = await readThrough<CompanyDirectory>(
       deps.cache,
       COMPANIES_CACHE_KEY,
       COMPANIES_TTL_SECONDS,
-      () => fetchCompanyDirectory(deps.client),
+      () => fetchCompanyDirectory(deps.client, log),
       { refresh: options.refresh },
     );
 
     const { companies, skipped, failedMarkets } = result.value;
+    log.info("gse: company directory ready", {
+      companies: companies.length,
+      skipped: skipped || undefined,
+      origin: result.origin,
+      ageSeconds: result.ageSeconds,
+      failedMarkets: failedMarkets.length ? failedMarkets.join(",") : undefined,
+    });
+
     const warnings: string[] = [];
     if (result.origin === "stale-cache") {
       warnings.push(
@@ -270,7 +296,9 @@ async function loadCompanies(
       },
     };
   } catch (error) {
-    console.warn("gse: falling back to the built-in company seed", error);
+    log.warn("gse: falling back to the built-in company seed", {
+      reason: describeError(error),
+    });
     return {
       companies: [...COMPANY_SEED],
       meta: {

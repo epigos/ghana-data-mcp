@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ParseError, UpstreamError } from "../../../src/lib/errors.js";
 import { USER_AGENT } from "../../../src/lib/http.js";
+import { createLogger } from "../../../src/lib/log.js";
 import {
   buildDataTablesBody,
   COMPANY_COLUMN_NAMES,
@@ -246,6 +247,152 @@ describe("GseClient.createSession", () => {
   });
 });
 
+describe("client logging", () => {
+  function recorder() {
+    const lines: string[] = [];
+    return {
+      lines,
+      text: () => lines.join("\n"),
+      find: (needle: string) => lines.find((line) => line.includes(needle)),
+      logger: createLogger({ debug: true, sink: (_, line) => lines.push(line) }),
+    };
+  }
+
+  function loggingClient(log: ReturnType<typeof recorder>) {
+    const { fetch: fetchImpl } = stubFetch([
+      { match: "/trading-and-data/", responses: [() => htmlResponse(tradingPageHtml)] },
+      { match: "admin-ajax.php", responses: [() => jsonResponse(historyPayload)] },
+    ]);
+    return new GseClient({ fetchImpl, ...fast, logger: log.logger });
+  }
+
+  it("tags every line with its source, so a second source stays distinguishable", async () => {
+    const log = recorder();
+    await loggingClient(log).fetchStockHistory({ symbol: "MTNGH", days: 30 });
+
+    expect(log.lines.length).toBeGreaterThan(0);
+    for (const line of log.lines) expect(line).toContain("source=gse");
+  });
+
+  it("announces the fetch it is about to make", async () => {
+    const log = recorder();
+    await loggingClient(log).fetchStockHistory({ symbol: "mtngh", days: 30 });
+
+    const line = log.find("gse: fetching stock history");
+    expect(line).toContain("symbol=MTNGH");
+    expect(line).toContain("days=30");
+  });
+
+  it("logs the session handshake and the row count that came back", async () => {
+    const log = recorder();
+    await loggingClient(log).fetchStockHistory({ symbol: "MTNGH", days: 30 });
+
+    expect(log.find("gse: session created")).toContain("page=/trading-and-data/");
+    const fetched = log.find("gse: table fetched");
+    expect(fetched).toContain("table=39");
+    expect(fetched).toContain("rows=12");
+    expect(fetched).toContain("recordsTotal=183595");
+  });
+
+  // The nonce comes from public page HTML and is what you need to debug a
+  // rejected POST; the cookie is a session token and must not be logged.
+  it("logs nonces but never the cookie value", async () => {
+    const log = recorder();
+    const { fetch: fetchImpl } = stubFetch([
+      {
+        match: "/trading-and-data/",
+        responses: [() => htmlResponse(tradingPageHtml, ["__cf_bm=super-secret-value; Path=/"])],
+      },
+      { match: "admin-ajax.php", responses: [() => jsonResponse(historyPayload)] },
+    ]);
+
+    await new GseClient({ fetchImpl, ...fast, logger: log.logger }).fetchStockHistory({
+      symbol: "MTNGH",
+      days: 30,
+    });
+
+    expect(log.find("gse: session detail")).toContain("39:0f8398a525");
+    expect(log.find("gse: session detail")).toContain("cookieNames=__cf_bm");
+    expect(log.text()).not.toContain("super-secret-value");
+  });
+
+  it("warns when the response held fewer rows than the search matched", async () => {
+    const log = recorder();
+    const { fetch: fetchImpl } = stubFetch([
+      { match: "/trading-and-data/", responses: [() => htmlResponse(tradingPageHtml)] },
+      {
+        match: "admin-ajax.php",
+        // 12 rows returned, but the filter says 500 matched — the page was cut short.
+        responses: [() => jsonResponse({ ...(historyPayload as object), recordsFiltered: 500 })],
+      },
+    ]);
+
+    await new GseClient({ fetchImpl, ...fast, logger: log.logger }).fetchStockHistory({
+      symbol: "MTNGH",
+      days: 30,
+    });
+
+    const line = log.find("gse: table response was truncated");
+    expect(line).toContain("rows=12");
+    expect(line).toContain("recordsFiltered=500");
+  });
+
+  it("does not cry truncation when the whole result came back", async () => {
+    const log = recorder();
+    await loggingClient(log).fetchStockHistory({ symbol: "MTNGH", days: 30 });
+
+    expect(log.find("gse: table response was truncated")).toBeUndefined();
+  });
+
+  it("names the likely cause when a table response is not JSON at all", async () => {
+    const log = recorder();
+    const { fetch: fetchImpl } = stubFetch([
+      { match: "/trading-and-data/", responses: [() => htmlResponse(tradingPageHtml)] },
+      { match: "admin-ajax.php", responses: [() => new Response("<html>error</html>")] },
+    ]);
+
+    await expect(
+      new GseClient({ fetchImpl, ...fast, logger: log.logger }).fetchStockHistory({
+        symbol: "MTNGH",
+        days: 30,
+      }),
+    ).rejects.toThrow(ParseError);
+
+    expect(log.find("gse: table response was not JSON")).toContain("rejected wdtNonce");
+  });
+
+  it("summarises the company directory fetch, including a failed board", async () => {
+    const log = recorder();
+    const { fetch: fetchImpl } = stubFetch([
+      { match: "/listed-companies/", responses: [() => htmlResponse(listedCompaniesHtml)] },
+      { match: "table_id=34", responses: [() => jsonResponse(mainMarketPayload)] },
+      { match: "table_id=35", responses: [() => jsonResponse(etfPayload)] },
+      { match: "table_id=36", responses: [() => errorResponse(500)] },
+    ]);
+
+    await new GseClient({ fetchImpl, ...fast, retries: 0, logger: log.logger }).fetchCompanyTables();
+
+    expect(log.find("gse: fetching company directory")).toContain("markets=main,gax,etf");
+    expect(log.find("gse: company table failed")).toContain("market=gax");
+    const done = log.find("gse: company directory fetched");
+    expect(done).toContain("ok=2");
+    expect(done).toContain("failedMarkets=gax");
+  });
+
+  it("logs nothing at all when no logger is given", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { fetch: fetchImpl } = stubFetch([
+      { match: "/trading-and-data/", responses: [() => htmlResponse(tradingPageHtml)] },
+      { match: "admin-ajax.php", responses: [() => jsonResponse(historyPayload)] },
+    ]);
+
+    await new GseClient({ fetchImpl, ...fast }).fetchStockHistory({ symbol: "MTNGH", days: 30 });
+
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+});
+
 describe("nonceFor", () => {
   it("returns the nonce for a table", () => {
     expect(nonceFor({ cookie: "c", nonces: { 34: "abc" } }, 34)).toBe("abc");
@@ -387,7 +534,7 @@ describe("GseClient.fetchStockHistory", () => {
     expect(Number(formOf(calls[1]!)["length"])).toBeLessThanOrEqual(2000);
   });
 
-  // WordPress answers a rejected nonce with a 200 carrying HTML.
+  // One way WordPress rejects a request: a 200 carrying an HTML error page.
   it("raises ParseError when admin-ajax returns non-JSON", async () => {
     const { fetch: fetchImpl } = stubFetch([
       { match: "/trading-and-data/", responses: [() => htmlResponse(tradingPageHtml)] },
@@ -397,5 +544,19 @@ describe("GseClient.fetchStockHistory", () => {
     await expect(client(fetchImpl).fetchStockHistory({ symbol: "MTNGH", days: 90 })).rejects.toThrow(
       ParseError,
     );
+  });
+
+  // The other way, and the sneaky one: admin-ajax.php answers a failed nonce
+  // with a bare `-1` and a 200. That is valid JSON, so it parses fine and would
+  // reach the parser as a confusing "no data array" error if not caught here.
+  it.each(["-1", "0"])("raises a nonce-specific ParseError for the %s sentinel", async (body) => {
+    const { fetch: fetchImpl } = stubFetch([
+      { match: "/trading-and-data/", responses: [() => htmlResponse(tradingPageHtml)] },
+      { match: "admin-ajax.php", responses: [() => new Response(body, { status: 200 })] },
+    ]);
+
+    await expect(
+      client(fetchImpl).fetchStockHistory({ symbol: "MTNGH", days: 90 }),
+    ).rejects.toThrow(/wdtNonce was probably rejected/);
   });
 });

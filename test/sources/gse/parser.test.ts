@@ -358,12 +358,26 @@ describe("extractSymbols", () => {
 });
 
 describe("fixture integrity", () => {
+  const raw = JSON.parse(
+    readFileSync(new URL("../../fixtures/history-mtngh.json", import.meta.url), "utf8"),
+  ) as { data: string[][]; recordsTotal: unknown; recordsFiltered: unknown };
+
   // Guards against a future edit quietly reshaping the fixtures the suite leans on.
   it("keeps the saved payload in the 14-column layout the parser assumes", () => {
-    const raw = JSON.parse(
-      readFileSync(new URL("../../fixtures/history-mtngh.json", import.meta.url), "utf8"),
-    ) as { data: string[][] };
     expect(raw.data.length).toBeGreaterThan(0);
     for (const row of raw.data) expect(row).toHaveLength(14);
+  });
+
+  // GSE sends these as JSON strings even though DataTables specifies numbers.
+  // The fixture must preserve that, or the string-handling path goes untested.
+  it("keeps the record counts as strings, the way GSE sends them", () => {
+    expect(typeof raw.recordsTotal).toBe("string");
+    expect(typeof raw.recordsFiltered).toBe("string");
+  });
+
+  // The fixture was trimmed from a larger response; if recordsFiltered still
+  // claimed the original count, the client would rightly log it as truncated.
+  it("has a recordsFiltered that matches the rows it actually holds", () => {
+    expect(Number(raw.recordsFiltered)).toBe(raw.data.length);
   });
 });

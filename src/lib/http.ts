@@ -1,5 +1,6 @@
 import { REPO_URL, SERVER_NAME, SERVER_VERSION } from "../meta.js";
 import { UpstreamError } from "./errors.js";
+import { silentLogger, type Logger } from "./log.js";
 
 /**
  * Identifies the project to the sites we scrape, with a link a webmaster can
@@ -18,6 +19,8 @@ export interface RequestOptions {
   baseDelayMs?: number;
   /** Shown in error messages so a failure names the call that produced it. */
   label?: string;
+  /** Where request/response lines go. Defaults to discarding them. */
+  logger?: Logger;
   /** Injectable for tests. */
   fetchImpl?: typeof fetch;
   sleepImpl?: (ms: number) => Promise<void>;
@@ -40,6 +43,11 @@ function backoffDelay(attempt: number, baseDelayMs: number): number {
  * fail immediately rather than burning attempts on a request that cannot work.
  *
  * A retried response has its body cancelled so the connection is not leaked.
+ *
+ * Every attempt is logged. This is the one choke point for outbound traffic, so
+ * logging here means no source can reach the network unobserved — and the
+ * `attempt`/`ms`/`status` fields are usually enough to tell a slow site from a
+ * failing one without reaching for a debugger.
  */
 export async function request(
   url: string,
@@ -51,6 +59,7 @@ export async function request(
     retries = 2,
     baseDelayMs = 300,
     label = url,
+    logger = silentLogger,
     fetchImpl = fetch,
     sleepImpl = defaultSleep,
   } = options;
@@ -58,11 +67,28 @@ export async function request(
   const headers = new Headers(init.headers);
   if (!headers.has("user-agent")) headers.set("user-agent", USER_AGENT);
 
+  const method = init.method ?? "GET";
+  const bodyBytes = typeof init.body === "string" ? init.body.length : undefined;
+
   let lastError: UpstreamError | undefined;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
-    if (attempt > 0) await sleepImpl(backoffDelay(attempt - 1, baseDelayMs));
+    if (attempt > 0) {
+      const delay = backoffDelay(attempt - 1, baseDelayMs);
+      logger.debug("http: retrying", { label, attempt: attempt + 1, delayMs: Math.round(delay) });
+      await sleepImpl(delay);
+    }
 
+    logger.debug("http: request", {
+      method,
+      url,
+      attempt: attempt + 1,
+      of: retries + 1,
+      bodyBytes,
+      cookies: headers.has("cookie") ? "yes" : "no",
+    });
+
+    const startedAt = Date.now();
     let response: Response;
     try {
       response = await fetchImpl(url, {
@@ -72,6 +98,12 @@ export async function request(
       });
     } catch (cause) {
       const aborted = cause instanceof Error && cause.name === "TimeoutError";
+      logger.warn("http: no response", {
+        label,
+        attempt: attempt + 1,
+        ms: Date.now() - startedAt,
+        reason: aborted ? "timeout" : "network",
+      });
       lastError = new UpstreamError(
         aborted ? `${label} timed out after ${timeoutMs}ms` : `${label} could not be reached`,
         { retryable: true, cause },
@@ -79,9 +111,31 @@ export async function request(
       continue;
     }
 
-    if (response.ok) return response;
+    const ms = Date.now() - startedAt;
+
+    if (response.ok) {
+      logger.info("http: response", {
+        method,
+        label,
+        status: response.status,
+        ms,
+        attempt: attempt + 1,
+        contentType: response.headers.get("content-type") ?? undefined,
+        bytes: response.headers.get("content-length") ?? undefined,
+      });
+      return response;
+    }
 
     const retryable = RETRYABLE_STATUSES.has(response.status);
+    logger.warn("http: error response", {
+      method,
+      label,
+      status: response.status,
+      ms,
+      attempt: attempt + 1,
+      retryable,
+    });
+
     lastError = new UpstreamError(`${label} returned ${response.status}`, {
       status: response.status,
       retryable,
@@ -92,6 +146,7 @@ export async function request(
     if (!retryable) throw lastError;
   }
 
+  logger.error("http: giving up", { label, attempts: retries + 1 });
   throw lastError ?? new UpstreamError(`${label} failed`, { retryable: true });
 }
 

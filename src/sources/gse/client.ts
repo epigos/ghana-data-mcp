@@ -1,5 +1,6 @@
 import { ParseError, UpstreamError } from "../../lib/errors.js";
 import { cookieHeaderFrom, request, type RequestOptions } from "../../lib/http.js";
+import { silentLogger, type Logger } from "../../lib/log.js";
 import { extractNonces } from "./parser.js";
 import { MAX_HISTORY_DAYS, type Market } from "./types.js";
 
@@ -76,6 +77,7 @@ export function nonceFor(session: GseSession, tableId: number): string {
 
 export interface GseClientOptions extends RequestOptions {
   baseUrl?: string;
+  logger?: Logger;
 }
 
 export interface FetchHistoryParams {
@@ -85,12 +87,15 @@ export interface FetchHistoryParams {
 
 export class GseClient {
   private readonly baseUrl: string;
+  private readonly logger: Logger;
   private readonly requestOptions: RequestOptions;
 
   constructor(options: GseClientOptions = {}) {
-    const { baseUrl = GSE_BASE_URL, ...requestOptions } = options;
+    const { baseUrl = GSE_BASE_URL, logger = silentLogger, ...requestOptions } = options;
     this.baseUrl = baseUrl.replace(/\/$/, "");
-    this.requestOptions = requestOptions;
+    this.logger = logger.child({ source: "gse" });
+    // The logger travels with the request options so lib/http logs every attempt.
+    this.requestOptions = { ...requestOptions, logger: this.logger };
   }
 
   /** Step 1: fetch a page and take the cookie + the nonces it hands out. */
@@ -111,7 +116,28 @@ export class GseClient {
       throw new UpstreamError(`gse.com.gh did not set any cookie on ${pagePath}`);
     }
 
-    const nonces = extractNonces(await response.text(), tableIds);
+    const html = await response.text();
+    const nonces = extractNonces(html, tableIds);
+
+    this.logger.info("gse: session created", {
+      page: pagePath,
+      tables: tableIds.join(","),
+      htmlBytes: html.length,
+    });
+    // Cookie *names* only — __cf_bm is a session token and does not belong in
+    // logs. The nonces are safe: they come from the public page HTML, are scoped
+    // to that page load, and are exactly what you need to debug a rejected POST.
+    this.logger.debug("gse: session detail", {
+      cookieNames: cookie
+        .split(";")
+        .map((pair) => pair.split("=")[0]?.trim())
+        .filter(Boolean)
+        .join(","),
+      nonces: Object.entries(nonces)
+        .map(([table, nonce]) => `${table}:${nonce}`)
+        .join(","),
+    });
+
     return { cookie, nonces };
   }
 
@@ -156,6 +182,15 @@ export class GseClient {
       nonce: nonceFor(session, tableId),
     });
 
+    this.logger.debug("gse: table query", {
+      table: tableId,
+      length,
+      order: `${orderColumn} ${orderDir}`,
+      searches: Object.entries(columnSearches)
+        .map(([index, search]) => `${index}=${search.value}`)
+        .join(" "),
+    });
+
     const response = await request(
       `${this.baseUrl}${ADMIN_AJAX_PATH}?action=get_wdtable&table_id=${tableId}`,
       {
@@ -173,18 +208,61 @@ export class GseClient {
       { ...this.requestOptions, label: `POST admin-ajax.php (table ${tableId})` },
     );
 
+    // Note: admin-ajax.php labels these responses `text/html` even when the body
+    // is JSON, so the content type is never worth checking — parse and see.
+    let payload: unknown;
     try {
-      return await response.json();
+      payload = await response.json();
     } catch (cause) {
-      // A 200 carrying HTML is how WordPress reports a rejected nonce.
+      // A 200 carrying an HTML error page is one way WordPress rejects a request.
+      this.logger.error("gse: table response was not JSON", {
+        table: tableId,
+        hint: "usually a rejected wdtNonce",
+      });
       throw new ParseError("admin-ajax.php did not return JSON", { cause });
     }
+
+    // The other way: admin-ajax.php answers a failed nonce or capability check
+    // with a bare `-1` or `0` and a 200 status. Both are *valid* JSON, so
+    // `response.json()` succeeds and the sentinel would otherwise slip through to
+    // the parser as a baffling "no data array" error.
+    if (payload === null || typeof payload !== "object") {
+      this.logger.error("gse: table response was a WordPress error sentinel", {
+        table: tableId,
+        payload: typeof payload === "number" || typeof payload === "string" ? payload : typeof payload,
+        hint: "usually a rejected or expired wdtNonce",
+      });
+      throw new ParseError(
+        `admin-ajax.php returned ${JSON.stringify(payload)} instead of a table — the wdtNonce was probably rejected`,
+      );
+    }
+
+    // `recordsFiltered` vs the row count is the tell for a truncated page: if
+    // they differ, the search matched more rows than `length` asked for.
+    const summary = summarizeTablePayload(payload);
+    this.logger.info("gse: table fetched", { table: tableId, ...summary });
+    if (summary.rows !== undefined && summary.recordsFiltered !== undefined && summary.rows < summary.recordsFiltered) {
+      this.logger.warn("gse: table response was truncated", {
+        table: tableId,
+        rows: summary.rows,
+        recordsFiltered: summary.recordsFiltered,
+        length,
+      });
+    }
+
+    return payload;
   }
 
   /** Convenience wrapper: handshake plus one price-table query for a symbol. */
   async fetchStockHistory({ symbol, days }: FetchHistoryParams): Promise<unknown> {
-    const session = await this.createSession(PAGES.tradingAndData, [TABLE_IDS.dailyPrices]);
     const boundedDays = Math.min(Math.max(Math.round(days), 1), MAX_HISTORY_DAYS);
+    this.logger.info("gse: fetching stock history", {
+      symbol: sanitizeSymbol(symbol),
+      days: boundedDays,
+      clamped: boundedDays !== Math.round(days) ? true : undefined,
+    });
+
+    const session = await this.createSession(PAGES.tradingAndData, [TABLE_IDS.dailyPrices]);
 
     return this.fetchTable({
       tableId: TABLE_IDS.dailyPrices,
@@ -218,12 +296,16 @@ export class GseClient {
   async fetchCompanyTables(
     tables: ReadonlyArray<{ tableId: number; market: Market }> = COMPANY_TABLES,
   ): Promise<Array<{ market: Market; payload?: unknown; error?: unknown }>> {
+    this.logger.info("gse: fetching company directory", {
+      markets: tables.map((table) => table.market).join(","),
+    });
+
     const session = await this.createSession(
       PAGES.listedCompanies,
       tables.map((table) => table.tableId),
     );
 
-    return Promise.all(
+    const results = await Promise.all(
       tables.map(async ({ tableId, market }) => {
         try {
           const payload = await this.fetchTable({
@@ -239,12 +321,53 @@ export class GseClient {
           });
           return { market, payload };
         } catch (error) {
-          console.warn(`gse: company table ${tableId} (${market}) failed`, error);
+          this.logger.warn("gse: company table failed", {
+            table: tableId,
+            market,
+            reason: error instanceof Error ? error.message : String(error),
+          });
           return { market, error };
         }
       }),
     );
+
+    const failed = results.filter((result) => result.payload === undefined);
+    this.logger.info("gse: company directory fetched", {
+      ok: results.length - failed.length,
+      failed: failed.length || undefined,
+      failedMarkets: failed.length ? failed.map((result) => result.market).join(",") : undefined,
+    });
+
+    return results;
   }
+}
+
+/**
+ * The counts wpDataTables reports alongside the rows.
+ *
+ * It sends them as JSON *strings* (`"recordsTotal": "183595"`) even though the
+ * DataTables protocol specifies numbers, so both forms are accepted — reading
+ * only numbers would silently drop the counts and disable the truncation check.
+ */
+function summarizeTablePayload(payload: unknown): {
+  rows?: number;
+  recordsTotal?: number;
+  recordsFiltered?: number;
+} {
+  if (!payload || typeof payload !== "object") return {};
+  const table = payload as { data?: unknown; recordsTotal?: unknown; recordsFiltered?: unknown };
+  return {
+    rows: Array.isArray(table.data) ? table.data.length : undefined,
+    recordsTotal: asCount(table.recordsTotal),
+    recordsFiltered: asCount(table.recordsFiltered),
+  };
+}
+
+function asCount(value: unknown): number | undefined {
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value !== "string" || value.trim() === "") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 /** Column names for the daily-price table (39), in index order. */

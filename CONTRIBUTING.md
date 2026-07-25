@@ -60,6 +60,13 @@ us a worse guest on someone else's server.
 **Cache through `readThrough`.** It gives you fresh-hit, live-load and
 stale-fallback in one call, and it reports which happened.
 
+**Take a `logger` and pass it on.** Accept one in your client's options and hand
+it to `request()` via the request options — that is what makes every outbound
+call show up in the logs. Bind `.child({ source: "<namespace>" })` so your lines
+stay greppable apart from other sources. Put one `info` line at each end of a
+user-visible operation and keep the detail at `debug`; never log a cookie,
+credential, or anything else that would be a problem in a log aggregator.
+
 **Label the origin.** Every result carries `meta.origin`. A cached, stale, or
 seeded answer must never look like a live one — a caller acting on stale market
 data should know that is what it has.

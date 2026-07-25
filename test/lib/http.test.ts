@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { UpstreamError } from "../../src/lib/errors.js";
 import { cookieHeaderFrom, request, USER_AGENT } from "../../src/lib/http.js";
+import { createLogger } from "../../src/lib/log.js";
 import { errorResponse, jsonResponse, stubFetch } from "../helpers/stubFetch.js";
 
 const fast = { baseDelayMs: 0 };
@@ -127,6 +128,116 @@ describe("request", () => {
 
     await request("https://example.com/x", {}, { fetchImpl, ...fast });
     expect(cancel).toHaveBeenCalled();
+  });
+});
+
+describe("request logging", () => {
+  function recorder() {
+    const lines: string[] = [];
+    return { lines, logger: createLogger({ debug: true, sink: (_, line) => lines.push(line) }) };
+  }
+
+  it("logs one response line per successful request", async () => {
+    const log = recorder();
+    const { fetch: fetchImpl } = stubFetch([
+      { match: "example.com", responses: [() => jsonResponse({ ok: true })] },
+    ]);
+
+    await request("https://example.com/x", {}, { fetchImpl, ...fast, logger: log.logger, label: "GET /x" });
+
+    const responseLines = log.lines.filter((line) => line.includes("http: response"));
+    expect(responseLines).toHaveLength(1);
+    expect(responseLines[0]).toContain("status=200");
+    expect(responseLines[0]).toContain("label=\"GET /x\"");
+    expect(responseLines[0]).toMatch(/ms=\d+/);
+  });
+
+  it("logs the request before it goes out, with the attempt number", async () => {
+    const log = recorder();
+    const { fetch: fetchImpl } = stubFetch([
+      { match: "example.com", responses: [() => jsonResponse({})] },
+    ]);
+
+    await request("https://example.com/x", { method: "POST", body: "a=1" }, { fetchImpl, ...fast, logger: log.logger });
+
+    const line = log.lines.find((entry) => entry.includes("http: request"));
+    expect(line).toContain("method=POST");
+    expect(line).toContain("url=https://example.com/x");
+    expect(line).toContain("attempt=1");
+    expect(line).toContain("bodyBytes=3");
+  });
+
+  it("records each retry and the eventual give-up", async () => {
+    const log = recorder();
+    const { fetch: fetchImpl } = stubFetch([
+      { match: "example.com", responses: [() => errorResponse(503)] },
+    ]);
+
+    await expect(
+      request("https://example.com/x", {}, { fetchImpl, ...fast, retries: 2, logger: log.logger }),
+    ).rejects.toThrow(UpstreamError);
+
+    expect(log.lines.filter((line) => line.includes("http: error response"))).toHaveLength(3);
+    expect(log.lines.filter((line) => line.includes("http: retrying"))).toHaveLength(2);
+    expect(log.lines.some((line) => line.includes("http: giving up"))).toBe(true);
+  });
+
+  it("marks whether a status was treated as retryable", async () => {
+    const log = recorder();
+    const { fetch: fetchImpl } = stubFetch([
+      { match: "example.com", responses: [() => errorResponse(404)] },
+    ]);
+
+    await expect(
+      request("https://example.com/x", {}, { fetchImpl, ...fast, logger: log.logger }),
+    ).rejects.toThrow(UpstreamError);
+
+    expect(log.lines.find((line) => line.includes("http: error response"))).toContain(
+      "retryable=false",
+    );
+  });
+
+  it("logs a network failure as no response", async () => {
+    const log = recorder();
+    const fetchImpl = (async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+
+    await expect(
+      request("https://example.com/x", {}, { fetchImpl, ...fast, retries: 0, logger: log.logger }),
+    ).rejects.toThrow(UpstreamError);
+
+    expect(log.lines.find((line) => line.includes("http: no response"))).toContain("reason=network");
+  });
+
+  // Cookies are session tokens. Logging that one was attached is useful; logging
+  // its value would put __cf_bm in Workers Logs.
+  it("reports that a cookie was sent without logging its value", async () => {
+    const log = recorder();
+    const { fetch: fetchImpl } = stubFetch([
+      { match: "example.com", responses: [() => jsonResponse({})] },
+    ]);
+
+    await request(
+      "https://example.com/x",
+      { headers: { cookie: "__cf_bm=super-secret-value" } },
+      { fetchImpl, ...fast, logger: log.logger },
+    );
+
+    expect(log.lines.find((line) => line.includes("http: request"))).toContain("cookies=yes");
+    expect(log.lines.join("\n")).not.toContain("super-secret-value");
+  });
+
+  it("stays silent when no logger is supplied", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { fetch: fetchImpl } = stubFetch([
+      { match: "example.com", responses: [() => jsonResponse({})] },
+    ]);
+
+    await request("https://example.com/x", {}, { fetchImpl, ...fast });
+
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });
 
