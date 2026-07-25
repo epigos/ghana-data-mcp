@@ -1,13 +1,16 @@
 # Ghana Stock Exchange (`gse_*`)
 
 Share prices, the listed-company directory, market-wide index history, and the
-fixed-income issuer list — scraped from [gse.com.gh](https://gse.com.gh). Six
+fixed-income issuer list — scraped from [gse.com.gh](https://gse.com.gh). Five
 tools, all read-only.
 
 Figures in this document were captured on **2026-07-25** and are there to show
 the shape of a response, not as current market data.
 
-- [Setup](#setup)
+Running the server and connecting a client are covered once in the
+[README](../README.md#connecting-an-mcp-client) — this guide assumes you are
+already connected.
+
 - [Sample chat queries](#sample-chat-queries)
 - [Tool reference](#tool-reference)
 - [Reading the data correctly](#reading-the-data-correctly)
@@ -15,37 +18,6 @@ the shape of a response, not as current market data.
 - [Troubleshooting](#troubleshooting)
 - [Symbol reference](#symbol-reference)
 - [How the scrape works](#how-the-scrape-works)
-
-## Setup
-
-Start the server (see the [README](../README.md#quick-start) for install), then
-connect a client.
-
-**Claude Code**
-
-```bash
-claude mcp add --transport http ghana-data http://localhost:8787/mcp
-```
-
-**Claude Desktop** — in `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "ghana-data": {
-      "type": "http",
-      "url": "http://localhost:8787/mcp"
-    }
-  }
-}
-```
-
-Swap the URL for your `workers.dev` URL once deployed. No API key, no auth — the
-data is public.
-
-Confirm the connection with a question that needs no scraping:
-
-> Use the ping tool on the ghana-data server.
 
 ## Sample chat queries
 
@@ -298,10 +270,6 @@ Everything after `name` is optional. `admittedYear` is a year only — GSE does 
 publish a full admission date — and is omitted when the value is not a plausible
 year. Both amounts are in **millions** of GHS.
 
-### `ping`
-
-No input. Returns `{ ok, server, version }`. For checking connectivity.
-
 ## Reading the data correctly
 
 Three things about GSE's published data will mislead a reader who assumes the
@@ -347,23 +315,25 @@ of a million on some rows. Quoting the text is the honest option.
 
 ## Knowing whether the data is fresh
 
-Every result carries a `meta` block:
+Every result carries a `meta` block, whose `origin` field is described in the
+[README](../README.md#is-the-data-fresh). What is GSE-specific is which origins
+you can actually see and how long each stays fresh:
 
-```json
-{ "origin": "live", "ageSeconds": 0, "skippedRows": 0 }
-```
+| Data                | Cache key                        | Fresh for                               | Can be `static-seed`? |
+| ------------------- | -------------------------------- | --------------------------------------- | --------------------- |
+| Company directory   | `gse:companies:v1`               | 7 days                                  | yes                   |
+| Fixed-income issuers| `gse:fixed-income-issuers:v1`    | 7 days                                  | no                    |
+| Price history       | `gse:history:v1:{symbol}:{days}` | 15 min during GSE hours, 12 h otherwise | no                    |
+| Market index        | `gse:market-index:v1:{days}`     | 15 min during GSE hours, 12 h otherwise | no                    |
 
-| `origin`      | Means                                                                |
-| ------------- | -------------------------------------------------------------------- |
-| `live`        | Just scraped from gse.com.gh                                         |
-| `cache`       | A fresh cached copy; `ageSeconds` says how old                       |
-| `stale-cache` | The scrape failed, so an expired copy was served. `meta.warning` says why |
-| `static-seed` | The directory scrape failed entirely; built-in fallback list         |
+Only the company directory has a built-in fallback list, so it is the only one
+that can come back `static-seed`. The others return a tool error if the scrape
+fails and nothing is cached.
 
-`stale-cache` and `static-seed` always set `meta.warning`, and a good answer
-passes that on to the user rather than presenting the numbers as current.
+GSE trades weekdays, roughly 09:30–15:30 GMT (Ghana keeps GMT year-round). Outside
+that window the day's rows are settled, so the longer TTL applies.
 
-To see the difference yourself, ask the same price question twice — the first
+To see the caching for yourself, ask the same price question twice — the first
 answer is `live`, the second `cache`, and the server logs no HTTP request for the
 second.
 
@@ -465,15 +435,8 @@ look up history for a company the directory never mentioned.
   also match `SCB PREF`; the parser narrows it to an exact match afterwards.
 - The market-index table has a weekday-name column whose values are inconsistently
   padded (`"Thursday "`). It is skipped — the date already carries that.
+- The two date-filtered tables disagree on which column the range goes in: 1 for
+  prices, 2 for the market index.
 
-### Caching
-
-| Key                                 | Fresh for                               |
-| ----------------------------------- | --------------------------------------- |
-| `gse:companies:v1`                  | 7 days                                  |
-| `gse:fixed-income-issuers:v1`       | 7 days                                  |
-| `gse:history:v1:{symbol}:{days}`    | 15 min during GSE hours, 12 h otherwise |
-| `gse:market-index:v1:{days}`        | 15 min during GSE hours, 12 h otherwise |
-
-GSE trades weekdays, roughly 09:30–15:30 GMT (Ghana keeps GMT year-round). Outside
-that window the day's rows are settled, so the longer TTL applies.
+Cache keys and TTLs are listed under
+[knowing whether the data is fresh](#knowing-whether-the-data-is-fresh).

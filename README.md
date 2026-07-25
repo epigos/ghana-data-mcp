@@ -27,20 +27,42 @@ the data caveats specific to it. **Start with [docs/GSE.md](docs/GSE.md).**
 | [`gse_search_company`](docs/GSE.md#gse_search_company)                           | Best-matching companies for a name, with a confidence score      |
 | [`gse_get_market_index`](docs/GSE.md#gse_get_market_index)                       | Market-wide daily GSE-CI, market cap, GSE-FSI and volume         |
 | [`gse_list_fixed_income_issuers`](docs/GSE.md#gse_list_fixed_income_issuers)     | Corporate bond issuers on the Ghana Fixed Income Market          |
-| [`ping`](docs/GSE.md#ping)                                                       | Health check                                                     |
+| `ping`                                                                          | Health check. No input; returns `{ ok, server, version }`        |
+
+`ping` is the only tool that belongs to no source — it touches nothing upstream,
+which is what makes it a clean connectivity check.
 
 Equities and debt are kept apart: GFIM issuers have no share code and no price
 history, so they get their own tool rather than being mixed into the company
 directory where `gse_get_stock_history` would appear to fail for them.
 
-Every result carries a `meta.origin` field — `live`, `cache`, `stale-cache`, or
-`static-seed` — plus a `meta.warning` when the data may be behind. Nothing is ever
-presented as fresh when it isn't.
-
 Some of what GSE publishes is easy to misread — `high`/`low` are annual rather
 than daily, a price row does not mean the stock traded, and the capital columns are
 free text. The tool schemas carry those warnings, and
 [docs/GSE.md](docs/GSE.md#reading-the-data-correctly) explains each one.
+
+### Is the data fresh?
+
+Every result from every source carries a `meta` block:
+
+```json
+{ "origin": "live", "ageSeconds": 0, "skippedRows": 0 }
+```
+
+| `origin`      | Means                                                                     |
+| ------------- | ------------------------------------------------------------------------- |
+| `live`        | Just scraped from the source site                                         |
+| `cache`       | A fresh cached copy; `ageSeconds` says how old                            |
+| `stale-cache` | The scrape failed, so an expired copy was served. `meta.warning` says why  |
+| `static-seed` | The scrape failed entirely and a built-in fallback list was used           |
+
+`stale-cache` and `static-seed` always set `meta.warning`, and a good answer passes
+that on rather than presenting the numbers as current. Nothing is ever presented as
+fresh when it isn't.
+
+Which origins a given tool can return, and how long each stays fresh, is documented
+per source — for GSE, see
+[knowing whether the data is fresh](docs/GSE.md#knowing-whether-the-data-is-fresh).
 
 ## Quick start
 
@@ -52,10 +74,53 @@ npm test
 npm run dev
 ```
 
-Point any MCP client at `http://localhost:8787/mcp`. Client-by-client setup, and
-queries to try once connected, are in [docs/GSE.md](docs/GSE.md#setup).
+That serves MCP at `http://localhost:8787/mcp`. Requires Node 22 or newer.
 
-Requires Node 22 or newer.
+## Connecting an MCP client
+
+The transport is Streamable HTTP and there is no authentication — the data is
+public, so there is no API key to configure. Any MCP client that speaks HTTP will
+work; the two most common are below.
+
+**Claude Code**
+
+```bash
+claude mcp add --transport http ghana-data http://localhost:8787/mcp
+```
+
+**Claude Desktop** — in `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "ghana-data": {
+      "type": "http",
+      "url": "http://localhost:8787/mcp"
+    }
+  }
+}
+```
+
+**Anything else** — point it at the `/mcp` endpoint and let it negotiate. There is
+also a plain `GET /health` that returns the server version and needs no MCP client
+at all:
+
+```bash
+curl http://localhost:8787/health
+```
+
+Swap `localhost:8787` for your `workers.dev` URL once [deployed](#deploying).
+
+### Checking it works
+
+Ask the model to run the `ping` tool — it confirms the connection without
+scraping anything:
+
+> Use the ping tool on the ghana-data server.
+
+Then try a real question. Each source's guide has a set of queries chosen to
+exercise its tools and data quirks — for GSE, see
+[sample chat queries](docs/GSE.md#sample-chat-queries).
 
 ## Deploying
 
@@ -104,8 +169,8 @@ possible: if KV expired entries at the TTL there would be nothing left to serve
 when a scrape fails.
 
 The tools try, in order: a live scrape, a fresh cached copy, an expired cached
-copy, and — for the GSE directory — a built-in seed list. Each outcome is labelled
-in `meta.origin`.
+copy, and — where a source provides one — a built-in seed list, reporting which
+they used in [`meta.origin`](#is-the-data-fresh).
 
 A partial failure degrades partially rather than wholly: if one company table
 errors while another succeeds, the directory returns what it got plus a warning
