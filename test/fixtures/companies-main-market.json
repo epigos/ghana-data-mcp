@@ -1,0 +1,313 @@
+{
+  "draw": 1,
+  "recordsTotal": "34",
+  "recordsFiltered": "34",
+  "data": [
+    [
+      "1",
+      "<a href='ACCESS' rel='' target='_self'>ACCESS</a>",
+      "Access Bank Ghana Plc",
+      "21/12/2022",
+      "GHS400milliion",
+      "118,093,134",
+      "173,947,596 ordinary shares"
+    ],
+    [
+      "2",
+      "<a href='ADB' rel='' target='_self'>ADB</a>",
+      "Agricultural Development Bank",
+      "12/12/2016",
+      "",
+      "",
+      ""
+    ],
+    [
+      "3",
+      "<a href='AGA' rel='' target='_self'>AGA</a>",
+      "AngloGold Ashanti Plc",
+      "27/04/2004",
+      "ZAR 4,899,021,716.98",
+      "417,339,100 (Ordinary Shares)",
+      "600.000.000"
+    ],
+    [
+      "4",
+      "<a href='ALW' rel='' target='_self'>ALW</a>",
+      "Aluworks LTD",
+      "29/11/1996",
+      "GH(",
+      "236,685,180 ordinary shares",
+      "1,000,000,000 ordinary shares"
+    ],
+    [
+      "5",
+      "<a href='ASG' rel='' target='_self'>ASG</a>",
+      "Asante Gold Corporation",
+      "29/06/2022",
+      "C$ 20,366,275",
+      "315.01",
+      ""
+    ],
+    [
+      "6",
+      "<a href='BOPP' rel='' target='_self'>BOPP</a>",
+      "Benso Oil Palm Plantation Ltd",
+      "16/04/2004",
+      "GH",
+      "34.8",
+      "50.000,000 SHARES OF NO PAR VALUE"
+    ],
+    [
+      "7",
+      "<a href='CAL' rel='' target='_self'>CAL</a>",
+      "CalBank PLC",
+      "05/11/2004",
+      "GH",
+      "548.26",
+      "1,000,000,000"
+    ],
+    [
+      "8",
+      "<a href='CLYD' rel='' target='_self'>CLYD</a>",
+      "Clydestone (Ghana) Limited",
+      "19/05/2004",
+      "GH",
+      "34",
+      "100.000.000"
+    ],
+    [
+      "9",
+      "<a href='CMLT' rel='' target='_self'>CMLT</a>",
+      "Camelot Ghana Ltd",
+      "17/09/1999",
+      "GHS 217,467",
+      "6.83",
+      "20,000,000"
+    ],
+    [
+      "10",
+      "<a href='CPC' rel='' target='_self'>CPC</a>",
+      "Cocoa Processing Company",
+      "14/02/2003",
+      "GH",
+      "2038.07",
+      "20.000.000.000"
+    ],
+    [
+      "11",
+      "<a href='DASPHARMA' rel='' target='_self'>DASPHARMA</a>",
+      "Dannex Ayrton Starwin Plc.",
+      "",
+      "",
+      "",
+      ""
+    ],
+    [
+      "12",
+      "<a href='EGH' rel='' target='_self'>EGH</a>",
+      "Ecobank Ghana PLC",
+      "13/07/2022",
+      "GHS226.64MILLION",
+      "293.23",
+      "500 MILLION"
+    ],
+    [
+      "13",
+      "<a href='EGL' rel='' target='_self'>EGL</a>",
+      "Enterprise Group PLC",
+      "",
+      "GHS258,886,100.00",
+      "170,892,825.00",
+      "200 million"
+    ],
+    [
+      "14",
+      "<a href='ETI' rel='' target='_self'>ETI</a>",
+      "Ecobank Transnational Incorporation",
+      "11/09/2006",
+      "US$867,714,000",
+      "24067.75",
+      "800000000"
+    ],
+    [
+      "15",
+      "<a href='FML' rel='' target='_self'>FML</a>",
+      "Fan Milk Limited",
+      "18/10/1991",
+      "GH",
+      "116.21",
+      "200,000,000"
+    ],
+    [
+      "16",
+      "<a href='GCB' rel='' target='_self'>GCB</a>",
+      "Ghana Commercial Bank Limited",
+      "17/05/1996",
+      "GHC 72,000,000",
+      "265",
+      "1,500,000,000"
+    ],
+    [
+      "17",
+      "<a href='GGBL' rel='' target='_self'>GGBL</a>",
+      "Guinness Ghana Breweries Plc",
+      "23/08/1991",
+      "GHS 272,879,113.44",
+      "100",
+      ""
+    ],
+    [
+      "18",
+      "<a href='GOIL' rel='' target='_self'>GOIL</a>",
+      "GOIL PLC",
+      "16/11/2007",
+      "GH",
+      "391.86",
+      "1,000,000,000"
+    ],
+    [
+      "19",
+      "<a href='MAC' rel='' target='_self'>MAC</a>",
+      "Mega African Capital Limited",
+      "23/04/2014",
+      "GH",
+      "9.95",
+      ""
+    ],
+    [
+      "20",
+      "<a href='MTNGH' rel='' target='_self'>MTNGH</a>",
+      "MTN Ghana",
+      "05/09/2018",
+      "GHS1,363,000",
+      "",
+      "100,000,000,000"
+    ],
+    [
+      "21",
+      "<a href='PBC' rel='' target='_self'>PBC</a>",
+      "Produce Buying Company Ltd.",
+      "17/05/2000",
+      "GHC 4,914,377",
+      "480",
+      "20,000,000,000"
+    ],
+    [
+      "22",
+      "<a href='RBGH' rel='' target='_self'>RBGH</a>",
+      "Republic Bank (Ghana) PLC.",
+      "05/10/1994",
+      "GHC 401,190,624",
+      "851, 966, 373",
+      "1.000.000.000"
+    ],
+    [
+      "23",
+      "<a href='SCB' rel='' target='_self'>SCB</a>",
+      "Standard Chartered Bank Ghana PLC",
+      "",
+      "GH",
+      "115.51 Ordinary Shares, 17.48 Pref. Shares",
+      "250 million- Ordinary"
+    ],
+    [
+      "24",
+      "<a href='SCB PREF' rel='' target='_self'>SCB PREF</a>",
+      "Standard Chartered Bank Ghana PLC",
+      "",
+      "GH",
+      "115.51 Ordinary Shares, 17.48 Pref. Shares",
+      "250 million- Ordinary"
+    ],
+    [
+      "25",
+      "<a href='SIC' rel='' target='_self'>SIC</a>",
+      "SIC Insurance Company Limited",
+      "25/01/2008",
+      "GHC 2,500,000",
+      "195.65",
+      "500.000.000"
+    ],
+    [
+      "26",
+      "<a href='SOGEGH' rel='' target='_self'>SOGEGH</a>",
+      "Societe Generale Ghana Limited",
+      "13/10/1995",
+      "GHC 62,393,557.80",
+      "429.06",
+      "500 million"
+    ],
+    [
+      "27",
+      "<a href='SWL' rel='' target='_self'>SWL</a>",
+      "Sam Wood Ltd.",
+      "24/04/2002",
+      "GHC 220,990",
+      "21.83",
+      "100.000.000"
+    ],
+    [
+      "28",
+      "<a href='TBL' rel='' target='_self'>TBL</a>",
+      "Trust Bank Limited (THE GAMBIA)",
+      "15/11/2002",
+      "DALASIS 200,000,000",
+      "22.75",
+      "200,000,000"
+    ],
+    [
+      "29",
+      "<a href='TLW' rel='' target='_self'>TLW</a>",
+      "Tullow Oil Plc",
+      "27/07/2011",
+      "GBP 144,728,808.8",
+      "906.96",
+      null
+    ],
+    [
+      "30",
+      "<a href='TOTAL' rel='' target='_self'>TOTAL</a>",
+      "TotalEnergies Ghana PLC",
+      "",
+      "51,222,715.01",
+      "111,874,072",
+      "111,874,072"
+    ],
+    [
+      "31",
+      "<a href='UNIL' rel='' target='_self'>UNIL</a>",
+      "Unilever Ghana PLC",
+      "",
+      "GH",
+      "62.5",
+      "100 million"
+    ],
+    [
+      "33",
+      "<a href='ALLGH' rel='' target='_self'>ALLGH</a>",
+      "Atlantic Lithium Limited",
+      "13/05/2024",
+      "AUD$ 129,873,021",
+      "649,669,053",
+      null
+    ],
+    [
+      "34",
+      "<a href='FAB' rel='' target='_self'>FAB</a>",
+      "First Atlantic Bank PLC",
+      "19/12/2025",
+      "741,217,831.23",
+      "378,231,140",
+      null
+    ],
+    [
+      "35",
+      "<a href='ZEN' rel='' target='_self'>ZEN</a>",
+      "ZEN Petroleum Holdings PLC",
+      "22/04/2026",
+      "Pre-Listing: GHS40,000 Post-Listing: GHS616,730,000.00",
+      "128,000,000",
+      null
+    ]
+  ]
+}

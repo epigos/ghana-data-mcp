@@ -1,0 +1,52 @@
+{
+  "draw": 1,
+  "recordsTotal": "5",
+  "recordsFiltered": "5",
+  "data": [
+    [
+      "1",
+      "<a href='DIGICUT' rel='' target='_self'>DIGICUT</a>",
+      "Digicut Advertising and Production Limited",
+      "11/04/2018",
+      "GHC 250,000",
+      "118.89 million",
+      "500,000,000"
+    ],
+    [
+      "2",
+      "<a href='HORDS' rel='' target='_self'>HORDS</a>",
+      "HORDS LTD",
+      "",
+      "GH",
+      "114.95",
+      ""
+    ],
+    [
+      "3",
+      "<a href='IIL' rel='' target='_self'>IIL</a>",
+      "Intravenous Infusions PLC",
+      "15/12/2015",
+      "GHS 11.62 million",
+      "258.82 million",
+      "50 billion"
+    ],
+    [
+      "4",
+      "<a href='MMH' rel='' target='_self'>MMH</a>",
+      "Meridian-Marshalls Holdings",
+      "",
+      "",
+      "96.08",
+      ""
+    ],
+    [
+      "6",
+      "<a href='SAMBA' rel='' target='_self'>SAMBA</a>",
+      "Samba Foods Ltd",
+      "",
+      "250000",
+      "5.98",
+      ""
+    ]
+  ]
+}

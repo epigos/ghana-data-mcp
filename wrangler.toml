@@ -1,0 +1,24 @@
+name = "ghana-data-mcp"
+main = "src/index.ts"
+compatibility_date = "2026-07-25"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+# Cache for every source's scrapes (plan §7).
+# Created with: npx wrangler kv namespace create GSE_CACHE
+[[kv_namespaces]]
+binding = "GSE_CACHE"
+id = "1dee2053e7564c25bc5f78e774e7491e"
+
+# Inbound per-IP rate limit (plan §8.1): 30 requests per 60s.
+# `namespace_id` is a local identifier for this limiter, not an account resource —
+# change it only if you add a second limiter. `period` accepts only 10 or 60.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 30, period = 60 }
+
+[vars]
+DEBUG = "0"

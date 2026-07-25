@@ -1,0 +1,47 @@
+{
+  "name": "ghana-data-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing public Ghana data (Ghana Stock Exchange prices and company directory) to AI tools.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:live": "GSE_LIVE=1 vitest run test/integration",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
+    "cf-typegen": "wrangler types"
+  },
+  "keywords": [
+    "mcp",
+    "ghana",
+    "ghana-stock-exchange",
+    "gse",
+    "cloudflare-workers",
+    "model-context-protocol"
+  ],
+  "author": "epigos",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "agents": "^0.19.0",
+    "linkedom": "^0.18.13",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260724.1",
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.114.0"
+  },
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/epigos/ghana-data-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/epigos/ghana-data-mcp/issues"
+  },
+  "homepage": "https://github.com/epigos/ghana-data-mcp#readme"
+}

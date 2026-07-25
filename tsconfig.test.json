@@ -1,0 +1,11 @@
+{
+  // Tests run under Node (vitest), so they get Node types instead of the
+  // Workers ones. Keeping the two apart avoids the conflicting global
+  // declarations the two type packages have for fetch/Response/Headers.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["test/**/*.ts", "vitest.config.ts"]
+}
