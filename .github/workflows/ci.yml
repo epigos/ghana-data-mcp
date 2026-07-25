@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: nothing here writes to the repo.
+permissions:
+  contents: read
+
+# A newer push to the same branch makes an in-flight run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The Workers runtime is V8, not Node — these versions only cover the
+        # toolchain and the test environment.
+        node: ["22", "24"]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # No network: every test runs against the fixtures in test/fixtures, so a
+      # red build means our code broke, never that gse.com.gh was down.
+      - name: Unit tests
+        run: npm test
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      # Catches what typecheck cannot: a module that fails to bundle for the
+      # Workers runtime, or an invalid wrangler.toml. Needs no credentials.
+      - name: Bundle for Workers (dry run)
+        run: npx wrangler deploy --dry-run --outdir=dist

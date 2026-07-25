@@ -1,7 +1,27 @@
 {
   "name": "ghana-data-mcp",
   "version": "0.1.0",
+  "private": true,
+  "type": "module",
   "description": "MCP server exposing public Ghana data (Ghana Stock Exchange prices and company directory) to AI tools.",
+  "license": "MIT",
+  "author": "epigos",
+  "keywords": [
+    "mcp",
+    "ghana",
+    "ghana-stock-exchange",
+    "gse",
+    "cloudflare-workers",
+    "model-context-protocol"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/epigos/ghana-data-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/epigos/ghana-data-mcp/issues"
+  },
+  "homepage": "https://github.com/epigos/ghana-data-mcp#readme",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
@@ -11,17 +31,9 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
     "cf-typegen": "wrangler types"
   },
-  "keywords": [
-    "mcp",
-    "ghana",
-    "ghana-stock-exchange",
-    "gse",
-    "cloudflare-workers",
-    "model-context-protocol"
-  ],
-  "author": "epigos",
-  "license": "MIT",
-  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "agents": "^0.19.0",
@@ -34,14 +46,5 @@
     "typescript": "^7.0.2",
     "vitest": "^4.1.10",
     "wrangler": "^4.114.0"
-  },
-  "private": true,
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/epigos/ghana-data-mcp.git"
-  },
-  "bugs": {
-    "url": "https://github.com/epigos/ghana-data-mcp/issues"
-  },
-  "homepage": "https://github.com/epigos/ghana-data-mcp#readme"
+  }
 }

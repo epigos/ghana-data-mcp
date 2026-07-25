@@ -1,5 +1,8 @@
 # ghana-data-mcp
 
+[![CI](https://github.com/epigos/ghana-data-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/epigos/ghana-data-mcp/actions/workflows/ci.yml)
+[![Upstream canary](https://github.com/epigos/ghana-data-mcp/actions/workflows/upstream-canary.yml/badge.svg)](https://github.com/epigos/ghana-data-mcp/actions/workflows/upstream-canary.yml)
+
 An MCP server that gives AI tools access to public Ghana data. It runs on
 Cloudflare Workers as a remote MCP server over Streamable HTTP.
 
@@ -165,6 +168,21 @@ npm run test:live # optional: hits gse.com.gh to catch upstream markup changes
 The unit tests run against saved fixtures in `test/fixtures/`, so CI never
 depends on a third-party site being up. `test:live` is the canary for upstream
 changes and is skipped by default.
+
+Requires Node 22 or newer.
+
+### CI
+
+| Workflow                                                    | Trigger                          | Does                                             |
+| ----------------------------------------------------------- | -------------------------------- | ------------------------------------------------ |
+| [`ci.yml`](.github/workflows/ci.yml)                         | push to `main`, PRs, manual      | Typecheck + unit tests on Node 22 and 24, plus a `wrangler deploy --dry-run` bundle check |
+| [`upstream-canary.yml`](.github/workflows/upstream-canary.yml) | 16:30 UTC Mon & Thu, manual      | The live tests against gse.com.gh                |
+
+The split is the point: CI stays green or red on **our** code, never on whether
+gse.com.gh happens to be up. The canary is the only job that touches the live
+site, and a failure there usually means GSE changed its markup rather than that
+this code broke — `test/integration/gse.live.test.ts` shows which assumption
+stopped holding. Neither workflow needs any secret.
 
 ## Degradation
 

@@ -93,11 +93,19 @@ npm test
 npm run typecheck
 ```
 
+CI runs both of those on Node 22 and 24, and also checks that the Worker still
+bundles (`wrangler deploy --dry-run`). Running them locally first just saves you
+a round trip.
+
 If you changed anything touching upstream requests, also run:
 
 ```bash
 npm run test:live
 ```
+
+That one is deliberately kept out of CI — a third-party site being down must
+never turn a PR red. It runs on a schedule in
+[`upstream-canary.yml`](.github/workflows/upstream-canary.yml) instead.
 
 ## Scraping etiquette
 

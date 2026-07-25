@@ -1,0 +1,43 @@
+name: Upstream canary
+
+# gse.com.gh is a WordPress site with no API contract, so its markup and table
+# ids can change without warning. This is the only job that touches it: it runs
+# the live integration tests that CI deliberately skips, so an upstream change is
+# caught here rather than by a user getting an empty result.
+#
+# A failure here does not mean the code is broken — it usually means gse.com.gh
+# changed. Start with test/integration/gse.live.test.ts to see which assumption
+# stopped holding.
+
+on:
+  schedule:
+    # 16:30 UTC Mondays and Thursdays — after the GSE session closes (Ghana is
+    # UTC+0 year-round). Twice weekly keeps the footprint to roughly 30 requests
+    # a week while still catching a breakage within a few days.
+    - cron: "30 16 * * 1,4"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-canary
+  cancel-in-progress: false
+
+jobs:
+  live:
+    name: Live scrape against gse.com.gh
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Live integration tests
+        run: npm run test:live
