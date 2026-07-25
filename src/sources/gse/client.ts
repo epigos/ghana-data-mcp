@@ -275,7 +275,7 @@ export class GseClient {
       },
       // At most ~5 trading days per calendar week, so `days` is always a
       // generous upper bound on the row count for the window.
-      length: Math.min(2000, Math.max(100, boundedDays)),
+      length: Math.min(10_000, Math.max(100, boundedDays)),
       orderColumn: 1,
       orderDir: "desc",
     });
@@ -360,7 +360,7 @@ export class GseClient {
         2: { value: dateRange(boundedDays), regex: false },
       },
       // One row per trading day for the whole market, so `days` is a safe bound.
-      length: Math.min(2000, Math.max(100, boundedDays)),
+      length: Math.min(10_000, Math.max(100, boundedDays)),
       orderColumn: 2,
       orderDir: "desc",
     });

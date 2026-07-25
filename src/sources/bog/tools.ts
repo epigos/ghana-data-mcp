@@ -20,7 +20,7 @@ const BILL_RATE_TTL_SECONDS = 12 * 60 * 60;
  * MCP tool surface for Bank of Ghana data, namespaced `bog_`.
  *
  * Interbank FX rates and the two bill-rate series are implemented. The remaining
- * four are registered stubs:
+ * two are registered stubs:
  * final input schemas and descriptions, but calling one returns an error. That
  * fixes the contract — names, inputs, which dataset belongs in which tool — before
  * the parsing work, and keeps the registration and docs scaffolding tested.
@@ -55,16 +55,6 @@ const daysInput = (what: string) => ({
     .describe(`Calendar days of ${what} to look back. Default ${DEFAULT_DAYS}.`),
 });
 
-const limitInput = (what: string) => ({
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .max(200)
-    .optional()
-    .describe(`Maximum number of ${what}, most recent first. Default 12.`),
-});
-
 interface StubDefinition {
   name: string;
   title: string;
@@ -91,26 +81,6 @@ const STUBS: readonly StubDefinition[] = [
         .describe("BoG publishes both. Default daily."),
     },
     probe: (client) => client.fetchInterbankInterestRates(),
-  },
-  {
-    name: "bog_get_treasury_auction_results",
-    title: "GOG T-bill auction results",
-    description:
-      "Results of the weekly Government of Ghana Treasury bill auctions: amounts tendered and " +
-      "accepted, and the rates cleared, per tenor. Use this for auction outcomes and demand; " +
-      "use bog_get_treasury_bill_rates for the resulting rate series.",
-    inputSchema: limitInput("auctions"),
-    probe: (client) => client.fetchTreasuryAuctionResults(),
-  },
-  {
-    name: "bog_get_central_bank_auction_results",
-    title: "BOG bill auction results",
-    description:
-      "Results of the weekly Bank of Ghana bill auctions — the central bank's own issuance, " +
-      "as distinct from the Government of Ghana auctions covered by " +
-      "bog_get_treasury_auction_results.",
-    inputSchema: limitInput("auctions"),
-    probe: (client) => client.fetchCentralBankAuctionResults(),
   },
   {
     name: "bog_list_external_facilities",

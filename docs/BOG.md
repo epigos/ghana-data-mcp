@@ -1,10 +1,10 @@
 # Bank of Ghana (`bog_*`)
 
 Treasury and money-market data published by the Bank of Ghana at
-[bog.gov.gh](https://www.bog.gov.gh/treasury-and-the-markets/). Seven tools.
+[bog.gov.gh](https://www.bog.gov.gh/treasury-and-the-markets/). Five tools.
 
-> **Status: 3 of 7 implemented.** Interbank FX rates and the two bill-rate series
-> work. The other four are registered stubs — final input schemas, but calling one
+> **Status: 3 of 5 implemented.** Interbank FX rates and the two bill-rate series
+> work. The other two are registered stubs — final input schemas, but calling one
 > returns an error.
 >
 > There is a certificate problem on BoG's server that stops the Workers runtime
@@ -17,8 +17,8 @@ Treasury and money-market data published by the Bank of Ghana at
 - [What the upstream looks like](#what-the-upstream-looks-like)
   - [The rate pages are wpDataTables](#the-rate-pages-are-wpdatatables-after-all)
   - [The tables, surveyed](#the-tables-surveyed)
-  - [The auction results are PDFs](#the-auction-results-are-pdfs)
-  - [The REST API](#the-rest-api-a-good-index-not-a-data-source)
+  - [The auction results are PDFs (out of scope)](#the-auction-results-are-pdfs)
+  - [The REST API carries no figures](#the-rest-api-carries-no-figures)
 - [Implementing a dataset](#implementing-a-dataset)
 - [What the stubs do when called](#what-the-stubs-do-when-called)
 
@@ -33,12 +33,15 @@ URLs were fetched and returned HTTP 200 on 2026-07-25.
 | `bog_get_treasury_bill_rates`          | Treasury Bill Rate                       | **live** |
 | `bog_get_central_bank_bill_rates`      | Bank of Ghana Bill Rates                 | **live** |
 | `bog_get_interbank_interest_rates`     | Interbank Interest Rates                 | stub   |
-| `bog_get_treasury_auction_results`     | Weekly GOG T-Bill Auction Results        | stub   |
-| `bog_get_central_bank_auction_results` | Weekly BOG Bill Auction Results          | stub   |
 | `bog_list_external_facilities`         | Project Administration & External Facilities | stub |
 
-Page URLs are in `BOG_PAGES` in `src/sources/bog/client.ts`; all seven returned
-HTTP 200 on 2026-07-25.
+Page URLs are in `BOG_PAGES` in `src/sources/bog/client.ts`.
+
+**Not covered:** the two weekly auction-result datasets (GOG T-Bill and BOG Bill).
+BoG publishes those only as [one PDF per tender](#the-auction-results-are-pdfs), and
+extracting tables from PDFs inside a Worker is a different and much larger job than
+parsing HTML. Excluded deliberately rather than left as a stub, so the tool list does
+not advertise something nobody intends to build.
 
 Two naming decisions worth stating, since both pairs are easy to confuse and a
 model picking the wrong one would answer a different question:
@@ -57,10 +60,9 @@ The input contracts are final and can be coded against now:
 | Tool                                   | Input                                             |
 | -------------------------------------- | ------------------------------------------------- |
 | `bog_get_interbank_fx_rates`           | `currency` only — **no date window**, see below   |
-| Bill rates                             | `days` (default 90, max 1825) plus `securityType` |
+| Bill rates                             | `days` (default 90, max 7300) plus `securityType` |
 | `bog_get_interbank_interest_rates`     | `days`, plus `frequency` — `daily` or `weekly`    |
 | `bog_get_interbank_interest_rates`     | plus `frequency` — `daily` or `weekly`            |
-| Auction results                        | `limit` — most recent auctions, default 12        |
 | `bog_list_external_facilities`         | `refresh`                                         |
 
 ### Outputs
@@ -137,7 +139,7 @@ a caller asking for one never gets the other.
 
 | Input          | Type   | Notes                                                              |
 | -------------- | ------ | ------------------------------------------------------------------ |
-| `days`         | number | Calendar days back. Default 90, max 1825.                          |
+| `days`         | number | Calendar days back. Default 90, max 7300 — see coverage below.      |
 | `securityType` | string | Matched leniently: `91`, `91 DAY` and `91 DAY BILL` all work.       |
 
 Rows come back oldest first:
@@ -177,8 +179,13 @@ Three things worth knowing:
   separators (`1,517`), which are stripped so a caller matching the string does not
   have to guess.
 
-Cached for 12 hours per `days` window — rates are set at weekly tenders, so hitting
-a central bank's site more often than that would be rude for no gain. The window is
+**Coverage.** `days` goes up to 7300 (20 years), which is what it takes to reach the
+start of the data: the Treasury table begins 26 Aug 2013 and holds 1355 rows across
+13 security types. A shorter ceiling hides most of that — a 5-year window returns 758
+rows and only 7 types.
+
+Cached for 12 hours per `days` window — rates are set at weekly tenders, so hitting a
+central bank's site more often than that would be rude for no gain. The window is
 cached unfiltered, so asking for one tenor after another does not re-scrape.
 
 #### Sample chat queries
@@ -208,6 +215,12 @@ than reporting no such data.
 
 `days` reaching back to 2020 surfaces the FXR notes and bonds, showing the table is
 broader than its name.
+
+> **What was the 7-year bond rate when Ghana last issued one?**
+
+`securityType: "7 YR"` with a long window. The most recent as of 2026-07-25 was
+26 Aug 2013 at 17.5% — a good check that the model reports the date rather than
+implying the rate is current.
 
 ## Blocker: BoG's TLS chain is incomplete
 
@@ -389,46 +402,38 @@ restriction still holds, so if BoG ever lifts it, the tool can grow the input.
 
 ### The auction results are PDFs
 
-This is the one that changes the shape of the work. Each tender is its own post
-whose page contains no table — just a link to a PDF:
+Each weekly tender is its own post whose page contains no table — just a link to a
+PDF:
 
 ```
 https://www.bog.gov.gh/wp-content/uploads/2026/07/Auctresults-2017.pdf
 ```
 
-Extracting tabular figures from PDFs inside a Cloudflare Worker is a different and
-much larger job than parsing HTML: no native PDF support, a text-extraction library
-to bundle and stay inside the size limit, and table reconstruction from positioned
-text runs — which is fragile in a way HTML parsing is not.
+Extracting tabular figures from PDFs inside a Cloudflare Worker means bundling a
+text-extraction library inside the size limit and reconstructing tables from
+positioned text runs, which is fragile in a way HTML parsing is not. So these two
+datasets are **out of scope** and have no tools.
 
-Worth deciding deliberately rather than drifting into. A reasonable middle path is
-for the auction tools to return the tender list with its PDF URL and publication
-date — genuinely useful, honest about what it is — and leave extraction until
-someone actually needs the numbers machine-readable.
+Most of what a caller would want from them is available anyway: the rate series that
+each auction sets is exactly what `bog_get_treasury_bill_rates` and
+`bog_get_central_bank_bill_rates` return, including the tender number. What the PDFs
+add is amounts tendered and accepted — demand, rather than price.
 
-### The REST API: a good index, not a data source
+### The REST API carries no figures
 
-`/wp-json/wp/v2/` is real and open, and the custom post types line up with several
-datasets: `gog_auction_results`, `bog_auction_results`, `daily_interest_rate`,
-`avg_interest_rate`, `exchange_rates`.
+Worth recording so nobody re-investigates: `/wp-json/wp/v2/` is open and exposes
+custom post types that look promising — `gog_auction_results`, `bog_auction_results`,
+`daily_interest_rate`, `avg_interest_rate`, `exchange_rates`. None of them carry data.
 
-But it does not carry the figures:
-
-- **`content.rendered` is empty** on these post types — verified on
-  `daily_interest_rate` and `gog_auction_results`. Not "HTML to parse": zero bytes.
+- **`content.rendered` is empty** — zero bytes, verified on `daily_interest_rate` and
+  `gog_auction_results`. Not "HTML to parse".
 - **`acf` is empty and `meta` holds only analytics keys.** The values live in
   JetEngine post meta, which is not registered for REST exposure.
-- **`exchange_rates` returns an empty array** entirely.
-- **There is no BoG data API.** All 18 REST namespaces were enumerated; every custom
-  one belongs to a third-party plugin (Elementor, JetEngine, Contact Form 7,
-  analytics). There is no `bog/v1`.
+- **`exchange_rates` returns an empty array.**
+- **There is no BoG data API.** All 18 namespaces were enumerated; every custom one
+  belongs to a third-party plugin (Elementor, JetEngine, Contact Form 7, analytics).
 
-What the API *is* good for is indexing. For the auction datasets it is the right
-tool: a paginated, date-ordered list of tenders, each with a `link` that resolves to
-its PDF — far better than scraping a list page. It supports `per_page`, `_fields`
-and the standard `after`/`before` date filters.
-
-For the rate series it adds nothing the page does not already give.
+The wpDataTables route above is strictly better for everything still in scope.
 
 ## Implementing a dataset
 

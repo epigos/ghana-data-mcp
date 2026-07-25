@@ -21,6 +21,10 @@ import { MAX_DAYS } from "./types.js";
  *  - The nonce is exposed as `wdtNonceFrontendServerSide_<id>`, not
  *    `wdtNonceFrontendEdit_<id>`. Looking for the wrong name reads exactly like
  *    "there is no table here", which is a misleading way to fail.
+ * The two weekly auction-result datasets are deliberately absent: BoG publishes
+ * those as one PDF per tender rather than as tables, and PDF table extraction inside
+ * a Worker is a different and much larger job. See docs/BOG.md.
+ *
  *  - **No cookie is required.** The POST succeeds with the nonce alone; verified
  *    by issuing it both with and without the PHPSESSID the page hands out. The
  *    cookie is still sent when the page gives one, to stay close to what a browser
@@ -39,8 +43,6 @@ export const BOG_PAGES = {
   centralBankBillRates: "/treasury-and-the-markets/bank-of-ghana-bill-rates/",
   interbankFxRates: "/treasury-and-the-markets/daily-interbank-fx-rates/",
   interbankInterestRates: "/treasury-and-the-markets/interbank-interest-rates/",
-  treasuryAuctionResults: "/gog_auction_results/",
-  centralBankAuctionResults: "/bog_auction_results/",
   externalFacilities: "/treasury-and-the-markets/project-administration-and-external-facilities/",
 } as const;
 
@@ -88,19 +90,6 @@ export const BILL_RATE_COLUMN_NAMES = [
   "vl_discount_rate",
   "vl_interest_rate",
 ] as const;
-
-/**
- * WordPress REST collections on the same site. Kept for the auction datasets,
- * where they are the right index — each record's `link` resolves to a PDF. They
- * carry no figures themselves: `content.rendered` is empty. See docs/BOG.md.
- */
-export const BOG_REST_COLLECTIONS = {
-  treasuryAuctionResults: "/wp-json/wp/v2/gog_auction_results",
-  centralBankAuctionResults: "/wp-json/wp/v2/bog_auction_results",
-  dailyInterestRate: "/wp-json/wp/v2/daily_interest_rate",
-  averageInterestRate: "/wp-json/wp/v2/avg_interest_rate",
-  exchangeRates: "/wp-json/wp/v2/exchange_rates",
-} as const;
 
 export type BogSession = TableSession;
 
@@ -342,14 +331,6 @@ export class BogClient {
 
   async fetchInterbankInterestRates(): Promise<unknown> {
     this.notImplemented("interbank interest rates", "interbankInterestRates");
-  }
-
-  async fetchTreasuryAuctionResults(): Promise<unknown> {
-    this.notImplemented("GOG T-bill auction results", "treasuryAuctionResults");
-  }
-
-  async fetchCentralBankAuctionResults(): Promise<unknown> {
-    this.notImplemented("BOG bill auction results", "centralBankAuctionResults");
   }
 
   async fetchExternalFacilities(): Promise<unknown> {

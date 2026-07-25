@@ -11,11 +11,13 @@ import { z } from "zod";
  * lib/results.ts and applies here unchanged.
  */
 
-export const MAX_DAYS = 1825; // five years
+/**
+ * Twenty years, which comfortably covers everything BoG publishes: the Treasury
+ * rate table reaches back to 26 Aug 2013 and the interbank reverse-repo series to
+ * 2002. An earlier five-year ceiling silently put most of that out of reach.
+ */
+export const MAX_DAYS = 7300;
 export const DEFAULT_DAYS = 90;
-
-/** Default number of auctions returned by the auction-result tools. */
-export const DEFAULT_AUCTION_LIMIT = 12;
 
 /**
  * One interbank reference rate for the cedi against another currency.

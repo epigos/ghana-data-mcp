@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { request, USER_AGENT } from "../../src/lib/http.js";
-import {
-  BOG_BASE_URL,
-  BOG_PAGES,
-  BOG_REST_COLLECTIONS,
-  BogClient,
-} from "../../src/sources/bog/client.js";
+import { BOG_BASE_URL, BOG_PAGES, BogClient } from "../../src/sources/bog/client.js";
 import {
   parseBillRatePayload,
   parseInterbankFxPayload,
@@ -15,10 +10,11 @@ import {
 /**
  * Live canary for the Bank of Ghana source.
  *
- * These protect two things: the mapping in client.ts (seven dataset URLs and the
- * REST collections behind them), and the one implemented dataset — interbank FX,
- * including the evidence that its table is restricted to a single date, which is
- * why that tool takes no date range.
+ * These protect the mapping in client.ts (five dataset URLs) and the three
+ * implemented datasets: interbank FX — including the evidence that its table is
+ * restricted to a single date, which is why that tool takes no date range — and the
+ * two bill-rate series, including that the upstream date filter really does bound
+ * what comes back.
  *
  * ## Why this has its own env var instead of riding on GSE_LIVE
  *
@@ -47,23 +43,6 @@ describe.skipIf(!live)("bog.gov.gh (live)", () => {
     expect(response.status).toBe(200);
     expect((await response.text()).length).toBeGreaterThan(1000);
   }, 45_000);
-
-  it.each(Object.entries(BOG_REST_COLLECTIONS))(
-    "%s REST collection still responds",
-    async (_name, path) => {
-      const response = await request(
-        `${BOG_BASE_URL}${path}?per_page=1`,
-        { headers: { accept: "application/json" } },
-        { timeoutMs: 30_000, retries: 1, label: `GET ${path}` },
-      );
-
-      expect(response.status).toBe(200);
-      // An array is what a WP collection returns; contents may legitimately be
-      // empty (exchange_rates was, on 2026-07-25), so shape is all we assert.
-      expect(Array.isArray(await response.json())).toBe(true);
-    },
-    45_000,
-  );
 
   it("still returns parseable interbank FX rates", async () => {
     const client = new BogClient({ timeoutMs: 30_000, retries: 1 });

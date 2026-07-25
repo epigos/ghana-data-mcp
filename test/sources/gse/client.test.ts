@@ -284,7 +284,7 @@ describe("GseClient.fetchMarketIndex", () => {
     const { fetch: fetchImpl, calls } = indexStub();
     await client(fetchImpl).fetchMarketIndex({ days: 100_000 });
 
-    expect(Number(formOf(calls[1]!)["length"])).toBeLessThanOrEqual(2000);
+    expect(Number(formOf(calls[1]!)["length"])).toBeLessThanOrEqual(10_000);
   });
 });
 
@@ -603,7 +603,16 @@ describe("GseClient.fetchStockHistory", () => {
     const { fetch: fetchImpl, calls } = historyStub();
     await client(fetchImpl).fetchStockHistory({ symbol: "MTNGH", days: 100_000 });
 
-    expect(Number(formOf(calls[1]!)["length"])).toBeLessThanOrEqual(2000);
+    expect(Number(formOf(calls[1]!)["length"])).toBeLessThanOrEqual(10_000);
+  });
+
+  // The page bound has to clear a full-history window — GSE holds ~4000 rows for a
+  // liquid symbol since 2007 — or the truncation warning fires on every long query.
+  it("asks for a page large enough to hold two decades of one symbol", async () => {
+    const { fetch: fetchImpl, calls } = historyStub();
+    await client(fetchImpl).fetchStockHistory({ symbol: "MTNGH", days: 7300 });
+
+    expect(Number(formOf(calls[1]!)["length"])).toBeGreaterThanOrEqual(5000);
   });
 
   // One way WordPress rejects a request: a 200 carrying an HTML error page.

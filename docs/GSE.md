@@ -152,7 +152,7 @@ Daily price history for one share code, **oldest first**.
 | Input    | Type   | Notes                                            |
 | -------- | ------ | ------------------------------------------------ |
 | `symbol` | string | GSE share code, e.g. `MTNGH`. Case-insensitive.  |
-| `days`   | number | Calendar days back. Default 90, max 1825.        |
+| `days`   | number | Calendar days back. Default 90, max 7300 (20 years). |
 
 Each row:
 
@@ -223,7 +223,7 @@ whole; `gse_get_stock_history` is per-company.
 
 | Input  | Type   | Notes                                     |
 | ------ | ------ | ----------------------------------------- |
-| `days` | number | Calendar days back. Default 90, max 1825.  |
+| `days` | number | Calendar days back. Default 90, max 7300 (20 years). |
 
 ```json
 {

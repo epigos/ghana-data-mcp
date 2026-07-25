@@ -119,5 +119,10 @@ export const CompanyMatchSchema = CompanySchema.extend({
 });
 export type CompanyMatch = z.infer<typeof CompanyMatchSchema>;
 
-export const MAX_HISTORY_DAYS = 1825; // five years
+/**
+ * Twenty years, which clears the start of the data: GSE's price table goes back to
+ * at least 25 Jun 2007 (4065 rows for GCB alone). A five-year ceiling silently put
+ * most of that out of reach.
+ */
+export const MAX_HISTORY_DAYS = 7300;
 export const DEFAULT_HISTORY_DAYS = 90;

@@ -14,14 +14,16 @@ without restructuring anything — see [CONTRIBUTING.md](CONTRIBUTING.md).
 | Source                                | Prefix | Tools | Status | Covers                                                              |
 | ------------------------------------- | ------ | ----- | ------ | ------------------------------------------------------------------- |
 | [Ghana Stock Exchange](docs/GSE.md)   | `gse_` | 5     | live   | Share prices, company directory, market index, fixed-income issuers |
-| [Bank of Ghana](docs/BOG.md)          | `bog_` | 7     | 3 live, 4 stubs | Interbank FX rates, Treasury and BoG bill rates (live); interbank interest rates, auction results, external facilities (stubs) |
+| [Bank of Ghana](docs/BOG.md)          | `bog_` | 5     | 3 live, 2 stubs | Interbank FX rates, Treasury and BoG bill rates (live); interbank interest rates, external facilities (stubs) |
 
 Each source has its own guide with a full tool reference, sample chat queries, and
 the data caveats specific to it. **Start with [docs/GSE.md](docs/GSE.md).**
 
 Of the Bank of Ghana tools, **interbank FX rates and the two bill-rate series
-work**; the other four are registered stubs whose names and inputs are final but
-which return an error when called. Note also the unresolved
+work**; the other two are registered stubs whose names and inputs are final but
+which return an error when called. The weekly auction results are
+[out of scope](docs/BOG.md#the-auction-results-are-pdfs) — BoG publishes those only
+as PDFs. Note also the unresolved
 [TLS problem on BoG's server](docs/BOG.md#blocker-bogs-tls-chain-is-incomplete),
 which stops the Workers runtime reaching bog.gov.gh at all.
 
@@ -37,7 +39,7 @@ which stops the Workers runtime reaching bog.gov.gh at all.
 | [`bog_get_interbank_fx_rates`](docs/BOG.md#bog_get_interbank_fx_rates)        | Cedi interbank reference rates vs 19 currencies, latest day    |
 | [`bog_get_treasury_bill_rates`](docs/BOG.md#bog_get_treasury_bill_rates-and-bog_get_central_bank_bill_rates) | GoG bill, note and bond rates by tender, back to 2013 |
 | [`bog_get_central_bank_bill_rates`](docs/BOG.md#bog_get_treasury_bill_rates-and-bog_get_central_bank_bill_rates) | Bank of Ghana's own bill rates, back to 2016 |
-| [`bog_*` (4 more)](docs/BOG.md#datasets-and-tools)                            | Bank of Ghana treasury data — **stubs, return an error**       |
+| [`bog_*` (2 more)](docs/BOG.md#datasets-and-tools)                            | Interbank interest rates, external facilities — **stubs**      |
 | `ping`                                                                       | Health check. No input; returns `{ ok, server, version }`      |
 
 `ping` is the only tool that belongs to no source — it touches nothing upstream,
@@ -268,7 +270,7 @@ read: price history, the company directory across all three boards, the market
 index, and GFIM fixed-income issuers — with fuzzy company search, caching, stale
 and seed fallbacks, rate limiting and logging.
 
-**Bank of Ghana — interbank FX and both bill-rate series live, four stubs.** bog.gov.gh turns out to run the
+**Bank of Ghana — interbank FX and both bill-rate series live, two stubs.** bog.gov.gh turns out to run the
 same wpDataTables plugin as GSE, exposing its nonce under a different input name, so
 the shared client in `lib/wpDataTables.ts` serves both. All eight rate tables are
 surveyed with row counts and spans in [docs/BOG.md](docs/BOG.md#the-tables-surveyed),

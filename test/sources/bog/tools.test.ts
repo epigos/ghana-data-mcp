@@ -104,16 +104,16 @@ describe("BoG tool registration", () => {
     const names = (await client.listTools()).tools.map((tool) => tool.name).sort();
 
     expect(names).toEqual([
-      "bog_get_central_bank_auction_results",
       "bog_get_central_bank_bill_rates",
       "bog_get_interbank_fx_rates",
       "bog_get_interbank_interest_rates",
-      "bog_get_treasury_auction_results",
       "bog_get_treasury_bill_rates",
       "bog_list_external_facilities",
     ]);
-    // One tool per dataset listed on BoG's Treasury and the Markets section.
+    // One tool per dataset this source covers. The two weekly auction-result
+    // datasets are excluded on purpose — BoG publishes them only as PDFs.
     expect(names).toHaveLength(Object.keys(BOG_PAGES).length);
+    expect(names.some((name) => name.includes("auction"))).toBe(false);
   });
 
   it("namespaces every tool, so it cannot collide with another source", async () => {
@@ -197,8 +197,6 @@ describe("BoG stub behaviour", () => {
 
     const cases: Array<[string, string]> = [
       ["bog_get_interbank_interest_rates", BOG_PAGES.interbankInterestRates],
-      ["bog_get_treasury_auction_results", BOG_PAGES.treasuryAuctionResults],
-      ["bog_get_central_bank_auction_results", BOG_PAGES.centralBankAuctionResults],
       ["bog_list_external_facilities", BOG_PAGES.externalFacilities],
     ];
 
@@ -251,9 +249,18 @@ describe("BoG stub inputs", () => {
     expect(result.content[0]?.text).not.toMatch(/not implemented yet/i);
   });
 
-  it("accepts an auction limit", async () => {
+  it("accepts a frequency on the interbank rates", async () => {
     const { client } = await harness();
-    const result = await call(client, "bog_get_treasury_auction_results", { limit: 4 });
+    const result = await call(client, "bog_get_interbank_interest_rates", { frequency: "weekly" });
+
+    expect(result.content[0]?.text).toMatch(/not implemented yet/i);
+  });
+
+  // The published history reaches back to 2013, so the ceiling has to clear it —
+  // an earlier five-year cap silently hid most of the series.
+  it("accepts a window long enough to reach the earliest published data", async () => {
+    const { client } = await harness();
+    const result = await call(client, "bog_get_interbank_interest_rates", { days: 5000 });
 
     expect(result.content[0]?.text).toMatch(/not implemented yet/i);
   });
