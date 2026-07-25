@@ -1,4 +1,4 @@
-import { NotImplementedError, ParseError } from "../../lib/errors.js";
+import { ParseError } from "../../lib/errors.js";
 import { cookieHeaderFrom, request, type RequestOptions } from "../../lib/http.js";
 import { silentLogger, type Logger } from "../../lib/log.js";
 import {
@@ -21,9 +21,7 @@ import { MAX_DAYS } from "./types.js";
  *  - The nonce is exposed as `wdtNonceFrontendServerSide_<id>`, not
  *    `wdtNonceFrontendEdit_<id>`. Looking for the wrong name reads exactly like
  *    "there is no table here", which is a misleading way to fail.
- * The two weekly auction-result datasets are deliberately absent: BoG publishes
- * those as one PDF per tender rather than as tables, and PDF table extraction inside
- * a Worker is a different and much larger job. See docs/BOG.md.
+ * Datasets BoG publishes only as PDFs are not covered — see docs/BOG.md.
  *
  *  - **No cookie is required.** The POST succeeds with the nonce alone; verified
  *    by issuing it both with and without the PHPSESSID the page hands out. The
@@ -44,7 +42,6 @@ export const BOG_PAGES = {
   interbankFxRates: "/treasury-and-the-markets/daily-interbank-fx-rates/",
   historicalInterbankFxRates: "/treasury-and-the-markets/historical-interbank-fx-rates/",
   interbankInterestRates: "/treasury-and-the-markets/interbank-interest-rates/",
-  externalFacilities: "/treasury-and-the-markets/project-administration-and-external-facilities/",
 } as const;
 
 /**
@@ -445,12 +442,6 @@ export class BogClient {
     });
   }
 
-  private notImplemented(dataset: string, page: keyof typeof BOG_PAGES): never {
-    throw new NotImplementedError(
-      `Bank of Ghana ${dataset} is not implemented yet. The data is published at ${this.pageUrl(page)}.`,
-    );
-  }
-
   /** Government of Ghana Treasury securities (table 2). */
   async fetchTreasuryBillRates(days: number, now?: Date): Promise<unknown> {
     return this.fetchBillRates({
@@ -469,10 +460,6 @@ export class BogClient {
       days,
       now,
     });
-  }
-
-  async fetchExternalFacilities(): Promise<unknown> {
-    this.notImplemented("project administration and external facilities", "externalFacilities");
   }
 }
 

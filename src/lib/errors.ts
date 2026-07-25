@@ -36,17 +36,6 @@ export class ParseError extends Error {
 }
 
 /**
- * A tool is registered but its upstream request is not written yet.
- *
- * Distinct from the other two on purpose: it is not a failure of the source site,
- * and no amount of retrying will help. It exists so a stub tool can say "this
- * does not work yet" instead of implying the data source is broken.
- */
-export class NotImplementedError extends Error {
-  override readonly name = "NotImplementedError";
-}
-
-/**
  * Human-readable one-liner for a thrown value, with a retry hint where one
  * applies. This is the text that ends up in an MCP `isError` result, so it is
  * written for a model to read and act on.
@@ -62,7 +51,6 @@ export function describeError(error: unknown): string {
   if (error instanceof ParseError) {
     return `Could not parse the upstream response: ${error.message}. The source site's markup may have changed; retrying will not help.`;
   }
-  if (error instanceof NotImplementedError) return error.message;
   if (error instanceof Error) return error.message;
   return String(error);
 }

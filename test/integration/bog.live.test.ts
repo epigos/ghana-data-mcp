@@ -12,11 +12,10 @@ import {
 /**
  * Live canary for the Bank of Ghana source.
  *
- * These protect the mapping in client.ts (five dataset URLs) and the three
- * implemented datasets: interbank FX — including the evidence that its table is
- * restricted to a single date, which is why that tool takes no date range — and the
- * two bill-rate series, including that the upstream date filter really does bound
- * what comes back.
+ * These protect the page mapping in client.ts and every implemented dataset: the FX
+ * snapshot and its historical series, the two bill-rate series, and the four
+ * interbank money-market series — including the upstream quirks each tool is built
+ * around, so that a change on BoG's side surfaces here rather than in a wrong answer.
  *
  * ## Why this has its own env var instead of riding on GSE_LIVE
  *

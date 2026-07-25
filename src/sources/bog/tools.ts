@@ -54,22 +54,8 @@ const INTEREST_RATE_TTL_SECONDS = 6 * 60 * 60;
 /**
  * MCP tool surface for Bank of Ghana data, namespaced `bog_`.
  *
- * Everything except project administration and external facilities is implemented.
- * That one remains a registered stub:
- * final input schemas and descriptions, but calling one returns an error. That
- * fixes the contract — names, inputs, which dataset belongs in which tool — before
- * the parsing work, and keeps the registration and docs scaffolding tested.
- *
- * Two rules the stub errors follow, because this is financial data:
- *
- *  1. They never return an empty result set. An empty `rows: []` reads as "there
- *     is no data", which is a different and false claim.
- *  2. They tell the model not to answer from memory, and give the public URL
- *     instead. A plausible-looking T-bill rate recalled from training data is
- *     worse than no answer at all.
- *
- * Stub descriptions are prefixed NOT YET AVAILABLE so a model reading the tool
- * list can avoid calling them in the first place.
+ * Four tools over four datasets: interbank FX rates (latest or historical), the two
+ * bill-rate series, and the interbank money-market rates.
  */
 
 export interface BogDeps {
@@ -77,32 +63,6 @@ export interface BogDeps {
   cache: Cache;
   logger?: Logger;
 }
-
-const NOT_AVAILABLE = "NOT YET AVAILABLE (stub — returns an error).";
-
-interface StubDefinition {
-  name: string;
-  title: string;
-  /** What the tool will return once implemented. */
-  description: string;
-  inputSchema: Record<string, z.ZodTypeAny>;
-  /** Called to produce the NotImplementedError, so the message names the page. */
-  probe: (client: BogClient) => Promise<unknown>;
-}
-
-const STUBS: readonly StubDefinition[] = [
-  {
-    name: "bog_list_external_facilities",
-    title: "Project administration and external facilities",
-    description:
-      "Bank of Ghana records on project administration and external facilities — externally " +
-      "funded facilities the central bank administers.",
-    inputSchema: {
-      refresh: z.boolean().optional().describe("Bypass the cache and re-fetch. Rarely needed."),
-    },
-    probe: (client) => client.fetchExternalFacilities(),
-  },
-];
 
 export function registerBogTools(server: McpServer, deps: BogDeps): void {
   const log = (deps.logger ?? silentLogger).child({ source: "bog" });
@@ -440,39 +400,6 @@ export function registerBogTools(server: McpServer, deps: BogDeps): void {
       },
     );
   }
-
-  for (const stub of STUBS) {
-    server.registerTool(
-      stub.name,
-      {
-        title: stub.title,
-        description: `${NOT_AVAILABLE} ${stub.description}`,
-        inputSchema: stub.inputSchema,
-        // No outputSchema: the row shape lands with the implementation, once the
-        // real payload is known. Declaring a guess now would mean callers coding
-        // against fields that may not survive contact with the data.
-        annotations: { readOnlyHint: true, openWorldHint: true },
-      },
-      async () => {
-        log.info("tool: stub called", { tool: stub.name });
-        try {
-          await stub.probe(deps.client);
-          // Unreachable while the client throws; guards against a half-finished
-          // implementation silently returning nothing.
-          return toolError(
-            `${stub.name} returned no data. This tool is not fully implemented — do not guess the figures.`,
-          );
-        } catch (error) {
-          return toolError(
-            `${describeError(error)} This server cannot retrieve it yet. Do not estimate these ` +
-              "figures or recall them from memory — they are financial data and a wrong number is " +
-              "worse than none. Tell the user the tool is not implemented yet and refer them to " +
-              "the page above.",
-          );
-        }
-      },
-    );
-  }
 }
 
 /**
@@ -501,14 +428,10 @@ async function loadFxHistory(
   );
 }
 
-/** Datasets still awaiting an implementation. */
-export const BOG_STUB_TOOL_NAMES: readonly string[] = STUBS.map((stub) => stub.name);
-
 /** Every tool this source registers. Exported so tests and docs stay in step. */
 export const BOG_TOOL_NAMES: readonly string[] = [
   "bog_get_interbank_fx_rates",
   "bog_get_treasury_bill_rates",
   "bog_get_central_bank_bill_rates",
   "bog_get_interbank_interest_rates",
-  ...BOG_STUB_TOOL_NAMES,
 ];

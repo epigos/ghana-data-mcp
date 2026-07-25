@@ -10,11 +10,7 @@ import {
   InterbankFxRateSchema,
   InterestRatePointSchema,
 } from "../../../src/sources/bog/types.js";
-import {
-  BOG_STUB_TOOL_NAMES,
-  BOG_TOOL_NAMES,
-  registerBogTools,
-} from "../../../src/sources/bog/tools.js";
+import { BOG_TOOL_NAMES, registerBogTools } from "../../../src/sources/bog/tools.js";
 import { fixture, fixtureJson } from "../../helpers/fixtures.js";
 import { errorResponse, htmlResponse, jsonResponse, stubFetch } from "../../helpers/stubFetch.js";
 
@@ -39,9 +35,8 @@ interface ToolResult {
 }
 
 /**
- * The fetch stub has no routes at all, so any attempt to reach the network throws
- * "no route matches" — which is how these tests prove the stubs never make an
- * upstream request.
+ * Registration-only harness: the fetch stub has no routes, so this is for inspecting
+ * the tool list rather than calling anything.
  */
 async function harness() {
   const { fetch: fetchImpl, calls } = stubFetch([]);
@@ -126,16 +121,9 @@ describe("BoG tool registration", () => {
       "bog_get_interbank_fx_rates",
       "bog_get_interbank_interest_rates",
       "bog_get_treasury_bill_rates",
-      "bog_list_external_facilities",
     ]);
-    // Only external facilities is still a stub.
-    expect(BOG_STUB_TOOL_NAMES).toEqual(["bog_list_external_facilities"]);
-    // Not one tool per page: the FX tool spans two (the latest-day snapshot and the
-    // historical series), and the two weekly auction-result datasets are excluded on
-    // purpose because BoG publishes them only as PDFs.
-    expect(names).toHaveLength(5);
-    expect(names.some((name) => name.includes("auction"))).toBe(false);
-    // Every page the client knows about should still be reachable by some tool.
+    // Not one tool per page: the FX tool spans two, the latest-day snapshot and the
+    // historical series.
     expect(Object.keys(BOG_PAGES)).toContain("historicalInterbankFxRates");
   });
 
@@ -162,97 +150,12 @@ describe("BoG tool registration", () => {
 
   // A model reading the tool list should be able to skip these without calling
   // one and burning a turn.
-  it("says up front in the description which tools are not available", async () => {
+  it("declares an input and output schema for every tool", async () => {
     const { client } = await harness();
     for (const tool of (await client.listTools()).tools) {
-      const isStub = BOG_STUB_TOOL_NAMES.includes(tool.name);
-      expect(/^NOT YET AVAILABLE/.test(tool.description ?? ""), tool.name).toBe(isStub);
+      expect(tool.inputSchema, tool.name).toBeDefined();
+      expect(tool.outputSchema, tool.name).toBeDefined();
     }
-  });
-
-  // The row shape is unknown until the real payload is; declaring a guess would
-  // have callers coding against fields that may not survive contact with it.
-  // Stubs have no output schema — the row shape is unknown until the real payload
-  // is. An implemented tool must have one.
-  it("declares an output schema only where the shape is known", async () => {
-    const { client } = await harness();
-    for (const tool of (await client.listTools()).tools) {
-      if (BOG_STUB_TOOL_NAMES.includes(tool.name)) {
-        expect(tool.outputSchema, tool.name).toBeUndefined();
-      } else {
-        expect(tool.outputSchema, tool.name).toBeDefined();
-      }
-    }
-  });
-});
-
-describe("BoG stub behaviour", () => {
-  it.each([...BOG_STUB_TOOL_NAMES])("%s reports an error rather than data", async (name) => {
-    const { client } = await harness();
-    const result = await call(client, name);
-
-    expect(result.isError, name).toBe(true);
-    expect(result.content[0]?.text).toMatch(/not implemented yet/i);
-  });
-
-  // This is the failure mode that matters: `rows: []` reads as "there is no such
-  // data", which is a different and false claim from "I cannot fetch it".
-  it.each([...BOG_STUB_TOOL_NAMES])("%s never returns an empty result set", async (name) => {
-    const { client } = await harness();
-    const result = await call(client, name);
-
-    expect(result.structuredContent).toBeUndefined();
-    expect(result.content[0]?.text).not.toMatch(/^\s*[[{]/);
-  });
-
-  // These are interest rates and exchange rates. A plausible-looking number
-  // recalled from training data is worse than no answer.
-  it.each([...BOG_STUB_TOOL_NAMES])("%s tells the model not to answer from memory", async (name) => {
-    const { client } = await harness();
-    const text = (await call(client, name)).content[0]?.text ?? "";
-
-    expect(text).toMatch(/do not estimate/i);
-    expect(text).toMatch(/memory/i);
-  });
-
-  it("points at the public page for the dataset", async () => {
-    const { client } = await harness();
-
-    const text = (await call(client, "bog_list_external_facilities")).content[0]?.text ?? "";
-    expect(text).toContain(`https://www.bog.gov.gh${BOG_PAGES.externalFacilities}`);
-  });
-
-  it("makes no upstream request at all", async () => {
-    const { client, calls } = await harness();
-    for (const name of BOG_STUB_TOOL_NAMES) await call(client, name);
-
-    expect(calls).toHaveLength(0);
-  });
-
-  it("does not blame the source site for a gap in this server", async () => {
-    const { client } = await harness();
-    const text = (await call(client, "bog_list_external_facilities")).content[0]?.text ?? "";
-
-    // "Upstream request failed" would send someone debugging bog.gov.gh.
-    expect(text).not.toMatch(/upstream request failed|could not be reached|returned \d{3}/i);
-  });
-});
-
-describe("BoG stub inputs", () => {
-  // External facilities is the last stub, and takes only `refresh`.
-  it("accepts refresh and still reports not-implemented", async () => {
-    const { client } = await harness();
-    const result = await call(client, "bog_list_external_facilities", { refresh: true });
-
-    expect(result.content[0]?.text).toMatch(/not implemented yet/i);
-  });
-
-  it("rejects an input the stub does not declare", async () => {
-    const { client } = await harness();
-    const result = await call(client, "bog_list_external_facilities", { refresh: "yes" });
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).not.toMatch(/not implemented yet/i);
   });
 });
 

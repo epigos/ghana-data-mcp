@@ -1,78 +1,38 @@
 # Bank of Ghana (`bog_*`)
 
 Treasury and money-market data published by the Bank of Ghana at
-[bog.gov.gh](https://www.bog.gov.gh/treasury-and-the-markets/). Five tools.
+[bog.gov.gh](https://www.bog.gov.gh/treasury-and-the-markets/). Four tools, all
+read-only.
 
-> **Status: 4 of 5 implemented.** Everything except project administration and
-> external facilities, which remains a registered stub — final input schema, but
-> calling it returns an error.
->
-> There is a certificate problem on BoG's server that stops the Workers runtime
-> fetching it at all — see [TLS blocker](#blocker-bogs-tls-chain-is-incomplete).
-> It has a safe local fix and does **not** block writing the parsers, but read it
-> before starting.
+Figures in this document were captured on **2026-07-25** and show the shape of a
+response, not current market data.
 
-- [Datasets and tools](#datasets-and-tools)
-- [Blocker: BoG's TLS chain is incomplete](#blocker-bogs-tls-chain-is-incomplete)
-- [What the upstream looks like](#what-the-upstream-looks-like)
-  - [The rate pages are wpDataTables](#the-rate-pages-are-wpdatatables-after-all)
-  - [The tables, surveyed](#the-tables-surveyed)
-  - [The auction results are PDFs (out of scope)](#the-auction-results-are-pdfs)
-  - [The REST API carries no figures](#the-rest-api-carries-no-figures)
-- [Implementing a dataset](#implementing-a-dataset)
-- [What the stubs do when called](#what-the-stubs-do-when-called)
+Running the server and connecting a client are covered once in the
+[README](../README.md#connecting-an-mcp-client).
 
-## Datasets and tools
+- [Tools](#tools)
+  - [`bog_get_interbank_fx_rates`](#bog_get_interbank_fx_rates)
+  - [Bill rates](#bog_get_treasury_bill_rates-and-bog_get_central_bank_bill_rates)
+  - [`bog_get_interbank_interest_rates`](#bog_get_interbank_interest_rates)
+- [How the data is published](#how-the-data-is-published)
+- [Running the live tests](#running-the-live-tests)
 
-One tool per dataset in BoG's Treasury and the Markets section. All seven page
-URLs were fetched and returned HTTP 200 on 2026-07-25.
+## Tools
 
-| Tool                                   | Dataset                                  | Status |
-| -------------------------------------- | ---------------------------------------- | ------ |
-| `bog_get_interbank_fx_rates`           | Daily Interbank FX Rates                 | **live** |
-| `bog_get_treasury_bill_rates`          | Treasury Bill Rate                       | **live** |
-| `bog_get_central_bank_bill_rates`      | Bank of Ghana Bill Rates                 | **live** |
-| `bog_get_interbank_interest_rates`     | Interbank Interest Rates                 | **live** |
-| `bog_list_external_facilities`         | Project Administration & External Facilities | stub |
+| Tool | Dataset | Coverage |
+| ---- | ------- | -------- |
+| `bog_get_interbank_fx_rates` | Interbank FX rates | Latest day, or history to 1996 |
+| `bog_get_treasury_bill_rates` | Treasury bill, note and bond rates | Back to 2013 |
+| `bog_get_central_bank_bill_rates` | Bank of Ghana bill rates | Back to 2016 |
+| `bog_get_interbank_interest_rates` | Interbank money-market rates | Back to 2002 |
 
-Page URLs are in `BOG_PAGES` in `src/sources/bog/client.ts`.
+Two pairs are easy to confuse, and picking the wrong one answers a different question:
 
-**Not covered:** the two weekly auction-result datasets (GOG T-Bill and BOG Bill).
-BoG publishes those only as [one PDF per tender](#the-auction-results-are-pdfs), and
-extracting tables from PDFs inside a Worker is a different and much larger job than
-parsing HTML. Excluded deliberately rather than left as a stub, so the tool list does
-not advertise something nobody intends to build.
-
-Two naming decisions worth stating, since both pairs are easy to confuse and a
-model picking the wrong one would answer a different question:
-
-- **Treasury vs central-bank bills.** `treasury` means Government of Ghana
-  securities; `central_bank` means bills the Bank of Ghana issues itself. BoG
-  publishes these as separate series and so do we.
-- **Rates vs auction results.** The rate tools give the published rate series; the
-  auction tools give the outcome of a specific weekly tender — amounts tendered
-  and accepted, and what cleared. Related, but not interchangeable.
-
-### Inputs (settled)
-
-The input contracts are final and can be coded against now:
-
-| Tool                                   | Input                                             |
-| -------------------------------------- | ------------------------------------------------- |
-| `bog_get_interbank_fx_rates`           | `currency` only — **no date window**, see below   |
-| Bill rates                             | `days` (default 90, max 7300) plus `securityType` |
-| `bog_get_interbank_interest_rates`     | `days`, plus `series` — one of four               |
-| `bog_get_interbank_interest_rates`     | plus `frequency` — `daily` or `weekly`            |
-| `bog_list_external_facilities`         | `refresh`                                         |
-
-### Outputs
-
-The four implemented tools declare a full `outputSchema`. The remaining stub declares
-none: their row shapes land with each implementation, once the real payload is in
-hand. Publishing a guessed schema would invite callers to code against fields that
-may not survive contact with the data — worse than publishing nothing.
-
-## Implemented tools
+- **Treasury vs central bank.** `treasury` means Government of Ghana securities;
+  `central_bank` means bills the Bank of Ghana issues itself. BoG publishes these as
+  separate series and so do we.
+- **Interbank FX vs interbank interest.** The first is exchange rates, the second is
+  the rate banks lend cedis to each other at.
 
 ### `bog_get_interbank_fx_rates`
 
@@ -330,134 +290,26 @@ rate. A good check that the model does not present either as *the* policy rate.
 `series: "reverse-repo", days: 7300` reaches 2002. Also exercises the undated-row
 handling, since `meta.skippedRows` will be 2.
 
-## Blocker: BoG's TLS chain is incomplete
+## How the data is published
 
-**www.bog.gov.gh cannot currently be fetched from Cloudflare Workers or from
-Node.** This is a misconfiguration on BoG's server, not something this repo can
-work around in code.
+Everything here comes from BoG's own wpDataTables endpoints, surveyed on 2026-07-25.
+Two of BoG's treasury datasets — the weekly GOG and BOG auction results — are not
+covered, because BoG publishes those only as one PDF per tender. The rate series each
+auction sets is covered by the bill-rate tools regardless; what the PDFs add is amounts
+tendered and accepted.
 
-The server presents only its leaf certificate and omits the DigiCert intermediate
-that signed it:
+### The pages are wpDataTables
 
-```
-$ openssl s_client -connect www.bog.gov.gh:443 -servername www.bog.gov.gh
-Certificate chain
- 0 s:C=GH, L=Accra, O=Bank of Ghana, CN=*.bog.gov.gh
-   i:C=US, O=DigiCert Inc, CN=DigiCert Global G2 TLS RSA SHA256 2020 CA1   <-- not sent
-verify error:num=21:unable to verify the first certificate
-```
-
-A client that fetches the missing issuer itself (macOS, and browsers) papers over
-it. A client that does not, fails:
-
-| Client                          | Result                                        |
-| ------------------------------- | --------------------------------------------- |
-| `curl` on macOS                 | 200 — the OS supplies the missing intermediate |
-| Node / undici (so vitest too)   | `UNABLE_TO_VERIFY_LEAF_SIGNATURE`             |
-| Workers runtime (`wrangler dev`)| fetch throws                                  |
-| Workers runtime → gse.com.gh    | 200 — same probe, so it is not the runtime      |
-
-That last row is the one that matters: a single probe worker fetched gse.com.gh
-successfully and bog.gov.gh unsuccessfully, which rules out a general outbound
-problem and points squarely at the chain.
-
-**Unverified:** this was tested against the local `workerd` runtime. Cloudflare's
-production edge may have the intermediate cached and succeed where local does not —
-that cannot be confirmed without deploying, so treat production as unknown rather
-than broken.
-
-Plain HTTP is not an escape hatch: `http://www.bog.gov.gh/` resets the connection.
-
-### Not the answer: disabling certificate verification
-
-Worth stating plainly, because it is the first thing that comes to mind:
-
-- **On Workers it is not even available.** The runtime's `fetch()` has no
-  equivalent of `rejectUnauthorized: false`. There is no flag to reach for.
-- **It would be the wrong trade anyway.** These are official financial reference
-  rates on a government host — precisely the case where a man-in-the-middle
-  matters. "Trust anything" is a much bigger hole than the one being patched.
-
-### Node and tests: fixed properly, today
-
-Node can be unblocked without weakening anything, by *supplying* the certificate
-BoG omits rather than by skipping the check. The leaf's own AIA extension names it:
-
-```bash
-curl -sO http://cacerts.digicert.com/DigiCertGlobalG2TLSRSASHA2562020CA1-1.crt
-openssl x509 -inform DER -in DigiCertGlobalG2TLSRSASHA2562020CA1-1.crt \
-  -out bog-intermediate.pem -outform PEM
-```
-
-```bash
-NODE_EXTRA_CA_CERTS=$PWD/bog-intermediate.pem BOG_LIVE=1 npm run test:live:bog
-```
-
-Verified 2026-07-25: without it, `UNABLE_TO_VERIFY_LEAF_SIGNATURE`; with it, HTTP
-200 and all 13 live tests pass. Verification stays fully on — the intermediate is
-the genuine DigiCert one, itself signed by a root Node already trusts, so this
-completes the chain instead of ignoring it.
-
-### Workers: still open
-
-`NODE_EXTRA_CA_CERTS` has no counterpart in the Workers runtime, so this does not
-help the deployed path. Two things could:
-
-1. **Ask BoG to serve the intermediate.** A one-line web-server change that fixes
-   every strict client, not just this one. This is the real fix.
-2. **Check whether production already works.** Only the local `workerd` runtime was
-   tested. Cloudflare's edge may resolve the chain where local does not — one
-   deployed probe answers it:
-
-   ```js
-   export default { async fetch() {
-     try { const r = await fetch("https://www.bog.gov.gh/treasury-and-the-markets/treasury-bill-rates/");
-           return Response.json({ ok: r.ok, status: r.status }); }
-     catch (e) { return Response.json({ error: String(e.message) }); }
-   }};
-   ```
-
-Failing both, a proxy that completes the chain would work, at the cost of a hop and
-a component to maintain.
-
-### Meanwhile, this is not blocking
-
-The blocker only affects the *last mile* — a live fetch from Workers. The parsing
-layer can be written and verified now, because the architecture already separates
-them: `parser.ts` is pure and fixture-tested, and payloads captured with `curl`
-(which works, since macOS completes the chain) are enough. When the certificate is
-fixed, live fetching starts working and no parsing code changes.
-
-## What the upstream looks like
-
-Surveyed on 2026-07-25. The seven datasets are **not** published the same way, and
-the differences decide how much work each one is.
-
-| Dataset                  | Where the figures actually are                          | Difficulty |
-| ------------------------ | ------------------------------------------------------- | ---------- |
-| Treasury bill rates      | HTML table in the page — ~10 most recent rows           | easy       |
-| BOG bill rates           | HTML table in the page                                  | easy       |
-| Interbank interest rates | HTML table in the page                                  | easy       |
-| Interbank FX rates       | Only a weighted average/median summary is in the page    | unclear    |
-| GOG T-bill auctions      | **A PDF per tender**                                    | hard       |
-| BOG bill auctions        | Very likely a PDF per tender too                        | hard       |
-| External facilities      | No table and no PDF in the page — mechanism unknown     | unclear    |
-
-### The rate pages are wpDataTables after all
-
-An earlier revision of this file concluded the GSE playbook did not transfer,
-because the pages have no `wdtNonceFrontendEdit_<id>` input. That was the wrong
-thing to look for. **bog.gov.gh exposes its nonce as
-`wdtNonceFrontendServerSide_<id>`**, and with that name every rate page turns out
-to be a server-side wpDataTable queryable exactly like GSE's:
+bog.gov.gh runs the same wpDataTables plugin as gse.com.gh, and exposes its nonce as
+`wdtNonceFrontendServerSide_<id>` — a different input name from GSE's
+`wdtNonceFrontendEdit_<id>`, which is worth knowing because looking for the wrong one
+fails in the most misleading way available: it looks exactly like "there is no table
+here".
 
 ```
 GET  /treasury-and-the-markets/daily-interbank-fx-rates/   → wdtNonceFrontendServerSide_31
 POST /wp-admin/admin-ajax.php?action=get_wdtable&table_id=31
 ```
-
-Looking for the wrong input name fails in the most misleading way available — it
-looks precisely like "there is no table here".
 
 One genuine difference from GSE: **no cookie is required.** The POST succeeds on the
 nonce alone, verified by issuing it both with and without the `PHPSESSID` the page
@@ -498,18 +350,16 @@ policy rate.
 So **history is available** for the bill rates and the interbank series: 1355 rows
 back to 2013 in one request. Those three datasets need no further discovery work.
 
-#### The FX snapshot table is latest-date-only — but there is a second table
+#### FX lives in two tables
 
 Table 31 answers an *unfiltered* query with `recordsTotal: 144457,
 recordsFiltered: 19`. A filter that narrow with no search supplied means the table's
 own definition restricts it to the latest date; `length=-1` still returns 19, and
 date-range searches on its date column return zero rows.
 
-An earlier revision of this file concluded from that BoG publishes no FX history. It
-does — on a **different page**, `/treasury-and-the-markets/historical-interbank-fx-rates/`,
-as **table 40**. Same six columns, the full 144,457 rows back to 02 Jan 1996, and a
-working date-range filter. The `recordsTotal` was the clue: table 31 could see all
-144,457 rows and was choosing to return 19 of them.
+The history is on a **different page**,
+`/treasury-and-the-markets/historical-interbank-fx-rates/`, as **table 40**: same six
+columns, the full 144,457 rows back to 02 Jan 1996, and a working date-range filter.
 
 Both are used, for different questions — see
 [`bog_get_interbank_fx_rates`](#bog_get_interbank_fx_rates).
@@ -523,83 +373,30 @@ Both are used, for different questions — see
   `{ tenorDays: 364 }` when the bill-rate tools land, unlike GSE's stated-capital
   column.
 
-### The auction results are PDFs
+## Running the live tests
 
-Each weekly tender is its own post whose page contains no table — just a link to a
-PDF:
+Unit tests run against saved fixtures and need no network. The live canary for this
+source hits bog.gov.gh and is opt-in:
 
-```
-https://www.bog.gov.gh/wp-content/uploads/2026/07/Auctresults-2017.pdf
-```
-
-Extracting tabular figures from PDFs inside a Cloudflare Worker means bundling a
-text-extraction library inside the size limit and reconstructing tables from
-positioned text runs, which is fragile in a way HTML parsing is not. So these two
-datasets are **out of scope** and have no tools.
-
-Most of what a caller would want from them is available anyway: the rate series that
-each auction sets is exactly what `bog_get_treasury_bill_rates` and
-`bog_get_central_bank_bill_rates` return, including the tender number. What the PDFs
-add is amounts tendered and accepted — demand, rather than price.
-
-### The REST API carries no figures
-
-Worth recording so nobody re-investigates: `/wp-json/wp/v2/` is open and exposes
-custom post types that look promising — `gog_auction_results`, `bog_auction_results`,
-`daily_interest_rate`, `avg_interest_rate`, `exchange_rates`. None of them carry data.
-
-- **`content.rendered` is empty** — zero bytes, verified on `daily_interest_rate` and
-  `gog_auction_results`. Not "HTML to parse".
-- **`acf` is empty and `meta` holds only analytics keys.** The values live in
-  JetEngine post meta, which is not registered for REST exposure.
-- **`exchange_rates` returns an empty array.**
-- **There is no BoG data API.** All 18 namespaces were enumerated; every custom one
-  belongs to a third-party plugin (Elementor, JetEngine, Contact Form 7, analytics).
-
-The wpDataTables route above is strictly better for everything still in scope.
-
-## Implementing a dataset
-
-The scaffolding is in place, so each dataset is a self-contained change:
-
-1. Add the fetch to `BogClient`, replacing the `notImplemented` call. Go through
-   `request()` from `lib/http` — never a bare `fetch` — so it inherits the
-   User-Agent, timeout, retry policy and request logging.
-2. Add a `parse…Payload` function to a new `sources/bog/parser.ts`, pure and
-   testable, and save a real response under `test/fixtures/`.
-3. Add the row schema to `sources/bog/types.ts`.
-4. Swap the stub handler in `tools.ts` for a cached read via `readThrough`, and
-   declare the `outputSchema` you now know.
-5. Pick a cache key and TTL, and document them here.
-
-The [GSE source](GSE.md#how-the-scrape-works) is the worked example, and
-[CONTRIBUTING.md](../CONTRIBUTING.md) has the house rules.
-
-Rate data has a natural TTL shape worth thinking about up front: T-bill rates
-change weekly at auction, interbank FX daily, and the external-facilities listing
-rarely. Caching a weekly series for 15 minutes would be pointless load on a
-central bank's website.
-
-## What the stubs do when called
-
-Each returns an MCP error naming the dataset and its public URL:
-
-```
-Bank of Ghana treasury bill rates is not implemented yet. The data is published
-at https://www.bog.gov.gh/treasury-and-the-markets/treasury-bill-rates/. This
-server cannot retrieve it yet. Do not estimate these figures or recall them from
-memory — they are financial data and a wrong number is worse than none. Tell the
-user the tool is not implemented yet and refer them to the page above.
+```bash
+npm run test:live:bog
 ```
 
-Two properties of that message are load-bearing, and both are covered by tests:
+It needs one piece of local setup. **www.bog.gov.gh serves only its leaf certificate
+and omits the DigiCert intermediate**, so a client that does not chase the missing
+issuer rejects the chain — Node reports `UNABLE_TO_VERIFY_LEAF_SIGNATURE`, while
+browsers and `curl` on macOS paper over it. Supply the intermediate and verification
+succeeds normally:
 
-- **It is not an empty result.** Returning `rows: []` would read as "there is no
-  such data", a different and false claim from "this server cannot fetch it".
-- **It tells the model not to answer from memory.** These are interest and
-  exchange rates; a plausible-looking figure recalled from training data is worse
-  than a refusal, and a model that has just been told a tool failed is exactly when
-  that temptation arises.
+```bash
+curl -sO http://cacerts.digicert.com/DigiCertGlobalG2TLSRSASHA2562020CA1-1.crt
+openssl x509 -inform DER -in DigiCertGlobalG2TLSRSASHA2562020CA1-1.crt \
+  -out bog-intermediate.pem -outform PEM
+NODE_EXTRA_CA_CERTS=$PWD/bog-intermediate.pem npm run test:live:bog
+```
 
-Descriptions are also prefixed `NOT YET AVAILABLE`, so a model reading the tool
-list can skip them without spending a call to find out.
+This adds the genuine DigiCert intermediate, itself signed by a root Node already
+trusts, so the chain is completed rather than ignored. The same gap affects the
+Cloudflare Workers runtime, which has no equivalent setting — so until BoG serves a
+complete chain, verify BoG changes with the live tests above rather than through a
+deployed Worker.

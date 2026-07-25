@@ -24,10 +24,10 @@ export function createServer(env: Env): McpServer {
         "Public Ghana data. Tools are namespaced by source. `gse_*` covers the Ghana Stock " +
         "Exchange: company directory, daily share prices, market index and fixed-income " +
         "issuers. Share codes are required for price lookups — resolve a company name with " +
-        "gse_search_company first. `bog_*` covers Bank of Ghana treasury and market data and " +
-        "is NOT IMPLEMENTED YET: those tools return an error, and you must not fill the gap " +
-        "with remembered or estimated figures. Every result carries a `meta.origin` field; " +
-        "when it is `stale-cache` or `static-seed`, tell the user the data may be behind.",
+        "gse_search_company first. `bog_*` covers Bank of Ghana treasury data: interbank FX " +
+        "rates, Treasury and central-bank bill rates, and interbank money-market rates. " +
+        "Every result carries a `meta.origin` field; when it is `stale-cache` or " +
+        "`static-seed`, tell the user the data may be behind.",
     },
   );
 
@@ -60,8 +60,6 @@ export function createServer(env: Env): McpServer {
     logger,
   });
 
-  // Registered stubs: the tools exist with their final inputs, but calling one
-  // returns an error until its fetch is implemented. See sources/bog/tools.ts.
   registerBogTools(server, {
     client: new BogClient({ timeoutMs: 15_000, retries: 2, logger }),
     cache,
