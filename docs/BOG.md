@@ -15,7 +15,6 @@ Running the server and connecting a client are covered once in the
   - [Bill rates](#bog_get_treasury_bill_rates-and-bog_get_central_bank_bill_rates)
   - [`bog_get_interbank_interest_rates`](#bog_get_interbank_interest_rates)
 - [How the data is published](#how-the-data-is-published)
-- [Running the live tests](#running-the-live-tests)
 
 ## Tools
 
@@ -372,31 +371,3 @@ Both are used, for different questions — see
 - **Tenor is a string to interpret**: `364 DAY BILL`. Regular enough to parse into
   `{ tenorDays: 364 }` when the bill-rate tools land, unlike GSE's stated-capital
   column.
-
-## Running the live tests
-
-Unit tests run against saved fixtures and need no network. The live canary for this
-source hits bog.gov.gh and is opt-in:
-
-```bash
-npm run test:live:bog
-```
-
-It needs one piece of local setup. **www.bog.gov.gh serves only its leaf certificate
-and omits the DigiCert intermediate**, so a client that does not chase the missing
-issuer rejects the chain — Node reports `UNABLE_TO_VERIFY_LEAF_SIGNATURE`, while
-browsers and `curl` on macOS paper over it. Supply the intermediate and verification
-succeeds normally:
-
-```bash
-curl -sO http://cacerts.digicert.com/DigiCertGlobalG2TLSRSASHA2562020CA1-1.crt
-openssl x509 -inform DER -in DigiCertGlobalG2TLSRSASHA2562020CA1-1.crt \
-  -out bog-intermediate.pem -outform PEM
-NODE_EXTRA_CA_CERTS=$PWD/bog-intermediate.pem npm run test:live:bog
-```
-
-This adds the genuine DigiCert intermediate, itself signed by a root Node already
-trusts, so the chain is completed rather than ignored. The same gap affects the
-Cloudflare Workers runtime, which has no equivalent setting — so until BoG serves a
-complete chain, verify BoG changes with the live tests above rather than through a
-deployed Worker.
