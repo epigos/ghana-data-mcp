@@ -5,7 +5,11 @@ import { describe, expect, it } from "vitest";
 
 import { createCache, createMemoryKV, type Cache } from "../../../src/lib/cache.js";
 import { BOG_PAGES, BogClient } from "../../../src/sources/bog/client.js";
-import { BillRateSchema, InterbankFxRateSchema } from "../../../src/sources/bog/types.js";
+import {
+  BillRateSchema,
+  InterbankFxRateSchema,
+  InterestRatePointSchema,
+} from "../../../src/sources/bog/types.js";
 import {
   BOG_STUB_TOOL_NAMES,
   BOG_TOOL_NAMES,
@@ -18,6 +22,11 @@ const fxPageHtml = fixture("bog-interbank-fx.trimmed.html");
 const fxPayload = fixtureJson("bog-interbank-fx.json");
 const fxHistoryPageHtml = fixture("bog-historical-fx.trimmed.html");
 const fxHistoryPayload = fixtureJson("bog-historical-fx-usd.json");
+const interbankPageHtml = fixture("bog-interbank-interest.trimmed.html");
+const dailyPayload = fixtureJson("bog-interbank-daily.json");
+const weeklyPayload = fixtureJson("bog-interbank-weekly.json");
+const repoPayload = fixtureJson("bog-interbank-reverse-repo.json");
+const depoPayload = fixtureJson("bog-interbank-depo.json");
 const tbillPageHtml = fixture("bog-treasury-bill-rates.trimmed.html");
 const tbillPayload = fixtureJson("bog-treasury-bill-rates.json");
 const bogBillPageHtml = fixture("bog-central-bank-bill-rates.trimmed.html");
@@ -119,6 +128,8 @@ describe("BoG tool registration", () => {
       "bog_get_treasury_bill_rates",
       "bog_list_external_facilities",
     ]);
+    // Only external facilities is still a stub.
+    expect(BOG_STUB_TOOL_NAMES).toEqual(["bog_list_external_facilities"]);
     // Not one tool per page: the FX tool spans two (the latest-day snapshot and the
     // historical series), and the two weekly auction-result datasets are excluded on
     // purpose because BoG publishes them only as PDFs.
@@ -207,15 +218,8 @@ describe("BoG stub behaviour", () => {
   it("points at the public page for the dataset", async () => {
     const { client } = await harness();
 
-    const cases: Array<[string, string]> = [
-      ["bog_get_interbank_interest_rates", BOG_PAGES.interbankInterestRates],
-      ["bog_list_external_facilities", BOG_PAGES.externalFacilities],
-    ];
-
-    for (const [name, page] of cases) {
-      const text = (await call(client, name)).content[0]?.text ?? "";
-      expect(text, name).toContain(`https://www.bog.gov.gh${page}`);
-    }
+    const text = (await call(client, "bog_list_external_facilities")).content[0]?.text ?? "";
+    expect(text).toContain(`https://www.bog.gov.gh${BOG_PAGES.externalFacilities}`);
   });
 
   it("makes no upstream request at all", async () => {
@@ -227,7 +231,7 @@ describe("BoG stub behaviour", () => {
 
   it("does not blame the source site for a gap in this server", async () => {
     const { client } = await harness();
-    const text = (await call(client, "bog_get_interbank_interest_rates")).content[0]?.text ?? "";
+    const text = (await call(client, "bog_list_external_facilities")).content[0]?.text ?? "";
 
     // "Upstream request failed" would send someone debugging bog.gov.gh.
     expect(text).not.toMatch(/upstream request failed|could not be reached|returned \d{3}/i);
@@ -235,46 +239,20 @@ describe("BoG stub behaviour", () => {
 });
 
 describe("BoG stub inputs", () => {
-  // The inputs are the part that is settled, so they are validated now — a caller
-  // can code against them before the data lands.
-  it("accepts a day window on the rate series", async () => {
+  // External facilities is the last stub, and takes only `refresh`.
+  it("accepts refresh and still reports not-implemented", async () => {
     const { client } = await harness();
-    const result = await call(client, "bog_get_interbank_interest_rates", { days: 30 });
+    const result = await call(client, "bog_list_external_facilities", { refresh: true });
 
-    // Still an error, but a *not-implemented* error rather than a validation one.
     expect(result.content[0]?.text).toMatch(/not implemented yet/i);
   });
 
-  it("rejects a day window outside the supported range", async () => {
+  it("rejects an input the stub does not declare", async () => {
     const { client } = await harness();
-    const result = await call(client, "bog_get_interbank_interest_rates", { days: 99_999 });
+    const result = await call(client, "bog_list_external_facilities", { refresh: "yes" });
 
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).not.toMatch(/not implemented yet/i);
-  });
-
-  it("rejects an unknown frequency on the interbank rates", async () => {
-    const { client } = await harness();
-    const result = await call(client, "bog_get_interbank_interest_rates", { frequency: "hourly" });
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0]?.text).not.toMatch(/not implemented yet/i);
-  });
-
-  it("accepts a frequency on the interbank rates", async () => {
-    const { client } = await harness();
-    const result = await call(client, "bog_get_interbank_interest_rates", { frequency: "weekly" });
-
-    expect(result.content[0]?.text).toMatch(/not implemented yet/i);
-  });
-
-  // The published history reaches back to 2013, so the ceiling has to clear it —
-  // an earlier five-year cap silently hid most of the series.
-  it("accepts a window long enough to reach the earliest published data", async () => {
-    const { client } = await harness();
-    const result = await call(client, "bog_get_interbank_interest_rates", { days: 5000 });
-
-    expect(result.content[0]?.text).toMatch(/not implemented yet/i);
   });
 });
 
@@ -662,5 +640,150 @@ describe("cedi redenomination", () => {
       .structuredContent as unknown as FxPayload;
 
     expect(payload.meta.warning ?? "").not.toMatch(/OLD cedis/);
+  });
+});
+
+interface RatePayload {
+  series: string;
+  seriesLabel: string;
+  days: number;
+  rowCount: number;
+  rows: Array<{ date: string; rate: number }>;
+  meta: { origin: string; warning?: string; skippedRows?: number };
+}
+
+/** Harness with all four interbank series wired. */
+async function interbankHarness() {
+  const { fetch: fetchImpl, calls } = stubFetch([
+    { match: "/interbank-interest-rates/", responses: [() => htmlResponse(interbankPageHtml, [])] },
+    { match: "table_id=69", responses: [() => jsonResponse(dailyPayload)] },
+    { match: "table_id=70", responses: [() => jsonResponse(weeklyPayload)] },
+    { match: "table_id=62", responses: [() => jsonResponse(repoPayload)] },
+    { match: "table_id=63", responses: [() => jsonResponse(depoPayload)] },
+  ]);
+
+  const server = new McpServer({ name: "test", version: "0.0.0" });
+  registerBogTools(server, {
+    client: new BogClient({ fetchImpl, baseDelayMs: 0, retries: 0 }),
+    cache: createCache(createMemoryKV()),
+  });
+  const client = new Client({ name: "test-client", version: "0.0.0" });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await Promise.all([client.connect(ct), server.connect(st)]);
+  return { client, calls };
+}
+
+describe("bog_get_interbank_interest_rates", () => {
+  it("defaults to the daily series", async () => {
+    const { client, calls } = await interbankHarness();
+    const result = await call(client, "bog_get_interbank_interest_rates", { days: 7300 });
+    const payload = result.structuredContent as unknown as RatePayload;
+
+    expect(result.isError).toBeFalsy();
+    expect(payload.series).toBe("daily");
+    expect(payload.seriesLabel).toBe("Daily Interest Rates");
+    expect(calls[1]?.url).toContain("table_id=69");
+    for (const row of payload.rows) expect(() => InterestRatePointSchema.parse(row)).not.toThrow();
+  });
+
+  // The mapping was confirmed from DOM containment; these pin it so a future edit
+  // cannot quietly swap which table answers which series.
+  it.each([
+    ["daily", 69, "Daily Interest Rates"],
+    ["weekly", 70, "Weekly Interest Rates"],
+    ["reverse-repo", 62, "Reverse Repo Rates"],
+    ["depo", 63, "Depo Rates"],
+  ] as const)("maps %s to table %i", async (series, tableId, label) => {
+    const { client, calls } = await interbankHarness();
+    const payload = (await call(client, "bog_get_interbank_interest_rates", { series, days: 7300 }))
+      .structuredContent as unknown as RatePayload;
+
+    expect(calls[1]?.url).toContain(`table_id=${tableId}`);
+    expect(payload.seriesLabel).toBe(label);
+  });
+
+  // Reverse repo sits above depo, straddling the policy rate. If the two ever came
+  // back the same way round, the mapping has broken.
+  it("keeps reverse repo above depo", async () => {
+    const { client } = await interbankHarness();
+    const repo = (await call(client, "bog_get_interbank_interest_rates", { series: "reverse-repo", days: 7300 }))
+      .structuredContent as unknown as RatePayload;
+    const depo = (await call(client, "bog_get_interbank_interest_rates", { series: "depo", days: 7300 }))
+      .structuredContent as unknown as RatePayload;
+
+    expect(repo.rows.at(-1)!.rate).toBeGreaterThan(depo.rows.at(-1)!.rate);
+  });
+
+  it("returns points oldest first", async () => {
+    const { client } = await interbankHarness();
+    const dates = (
+      (await call(client, "bog_get_interbank_interest_rates", { days: 7300 }))
+        .structuredContent as unknown as RatePayload
+    ).rows.map((row) => row.date);
+
+    expect(dates).toEqual([...dates].sort());
+  });
+
+  // These tables reject a date-range search, so the window is applied in memory —
+  // which means one cache entry per series answers every window.
+  it("applies the window in memory, from a single cached fetch", async () => {
+    const { client, calls } = await interbankHarness();
+
+    const wide = (await call(client, "bog_get_interbank_interest_rates", { days: 7300 }))
+      .structuredContent as unknown as RatePayload;
+    const afterFirst = calls.length;
+    const narrow = (await call(client, "bog_get_interbank_interest_rates", { days: 7 }))
+      .structuredContent as unknown as RatePayload;
+
+    expect(calls.length).toBe(afterFirst);
+    expect(narrow.meta.origin).toBe("cache");
+    expect(narrow.rowCount).toBeLessThan(wide.rowCount);
+  });
+
+  it("sends no date range upstream", async () => {
+    const { client, calls } = await interbankHarness();
+    await call(client, "bog_get_interbank_interest_rates", { days: 30 });
+
+    const form = Object.fromEntries(new URLSearchParams(calls[1]?.body ?? ""));
+    expect(form["columns[1][search][value]"]).toBe("");
+  });
+
+  it("declares the column names the chosen table expects", async () => {
+    const { client, calls } = await interbankHarness();
+    await call(client, "bog_get_interbank_interest_rates", { series: "weekly", days: 30 });
+
+    const form = Object.fromEntries(new URLSearchParams(calls[1]?.body ?? ""));
+    // Each series is built over a different post type; wpDataTables rejects a query
+    // whose column names do not match.
+    expect(form["columns[1][name]"]).toBe("avg_interest_rate_meta_end_date");
+    expect(form["columns[2][name]"]).toBe("avg_interest_rate_meta_rate");
+  });
+
+  // The MPC-derived series each carry a couple of rows with no effective date. That
+  // is upstream data, not a parsing fault, so it is reported rather than hidden.
+  it("counts undated rows as skipped without failing", async () => {
+    const { client } = await interbankHarness();
+    const payload = (await call(client, "bog_get_interbank_interest_rates", { series: "depo", days: 7300 }))
+      .structuredContent as unknown as RatePayload;
+
+    expect(payload.rowCount).toBeGreaterThan(0);
+    expect(payload.meta.skippedRows).toBeGreaterThan(0);
+  });
+
+  it("explains an empty window by naming the span that does exist", async () => {
+    const { client } = await interbankHarness();
+    const payload = (await call(client, "bog_get_interbank_interest_rates", { series: "reverse-repo", days: 1 }))
+      .structuredContent as unknown as RatePayload;
+
+    if (payload.rowCount === 0) {
+      expect(payload.meta.warning).toMatch(/The series runs \d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}/);
+    }
+  });
+
+  it("rejects an unknown series", async () => {
+    const { client } = await interbankHarness();
+    expect(
+      (await call(client, "bog_get_interbank_interest_rates", { series: "policy" })).isError,
+    ).toBe(true);
   });
 });

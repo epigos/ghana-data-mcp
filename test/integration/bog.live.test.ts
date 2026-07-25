@@ -5,6 +5,7 @@ import { BOG_BASE_URL, BOG_PAGES, BogClient } from "../../src/sources/bog/client
 import {
   parseBillRatePayload,
   parseInterbankFxPayload,
+  parseInterestRatePayload,
   resolveCurrencyPair,
 } from "../../src/sources/bog/parser.js";
 
@@ -144,6 +145,53 @@ describe.skipIf(!live)("bog.gov.gh (live)", () => {
     expect(skipped).toBe(0);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) expect(row.interestRate).toBeGreaterThan(0);
+  }, 60_000);
+
+  it.each(["daily", "weekly", "reverse-repo", "depo"] as const)(
+    "still returns a parseable %s interest-rate series",
+    async (series) => {
+      const client = new BogClient({ timeoutMs: 30_000, retries: 1 });
+      const { rows } = parseInterestRatePayload(
+        await client.fetchInterbankInterestRates(series),
+      );
+
+      expect(rows.length).toBeGreaterThan(50);
+      const dates = rows.map((row) => row.date);
+      expect(dates).toEqual([...dates].sort());
+      for (const row of rows) {
+        expect(row.rate).toBeGreaterThan(0);
+        expect(row.rate).toBeLessThan(100);
+      }
+    },
+    60_000,
+  );
+
+  // The series-to-table mapping was confirmed from the DOM; this is the data-side
+  // check that it still holds. Reverse repo is the lending side of BoG's corridor and
+  // depo the deposit side, so repo above depo is a structural property, not a
+  // coincidence of one day's numbers.
+  it("still returns reverse repo above depo", async () => {
+    const client = new BogClient({ timeoutMs: 30_000, retries: 1 });
+    const repo = parseInterestRatePayload(await client.fetchInterbankInterestRates("reverse-repo"));
+    const depo = parseInterestRatePayload(await client.fetchInterbankInterestRates("depo"));
+
+    expect(repo.rows.at(-1)!.rate).toBeGreaterThan(depo.rows.at(-1)!.rate);
+    expect(repo.rows.at(-1)!.date).toBe(depo.rows.at(-1)!.date);
+  }, 90_000);
+
+  // These four reject a date-range search — a range returns recordsFiltered: 3 with
+  // zero rows — which is why the tool windows in memory. If that ever changes, this
+  // fails and the fetch can push the window upstream.
+  it("still refuses a date-range search on the interest-rate tables", async () => {
+    const client = new BogClient({ timeoutMs: 30_000, retries: 1 });
+    const payload = (await client.fetchInterbankInterestRates("daily")) as {
+      recordsFiltered?: unknown;
+      data: unknown[][];
+    };
+
+    // Unfiltered, so filtered should equal the full series rather than a stray count.
+    expect(Number(payload.recordsFiltered)).toBe(payload.data.length);
+    expect(payload.data.length).toBeGreaterThan(1000);
   }, 60_000);
 
   it("serves bog.gov.gh to our identifying User-Agent", async () => {

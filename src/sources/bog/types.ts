@@ -75,3 +75,16 @@ export const BillRateSchema = z.object({
   interestRate: z.number().describe("Interest rate, percent per annum. The yield most callers want."),
 });
 export type BillRate = z.infer<typeof BillRateSchema>;
+
+/**
+ * One point in an interbank interest-rate series.
+ *
+ * The date means slightly different things per series — an effective date for the
+ * daily and MPC-derived series, a week-ending date for the weekly average — which is
+ * why the tool reports which series produced the rows.
+ */
+export const InterestRatePointSchema = z.object({
+  date: z.string().describe("Effective date, or week-ending date for the weekly series. ISO 8601."),
+  rate: z.number().describe("Rate, percent per annum."),
+});
+export type InterestRatePoint = z.infer<typeof InterestRatePointSchema>;

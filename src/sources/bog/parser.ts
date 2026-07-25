@@ -1,5 +1,5 @@
 import { ParseError } from "../../lib/errors.js";
-import type { BillRate, InterbankFxRate } from "./types.js";
+import type { BillRate, InterbankFxRate, InterestRatePoint } from "./types.js";
 
 /**
  * Pure transformation of Bank of Ghana responses. No network, no bindings —
@@ -280,5 +280,68 @@ export function parseBillRatePayload(
   rows.sort((a, b) =>
     a.date === b.date ? a.securityType.localeCompare(b.securityType) : a.date < b.date ? -1 : 1,
   );
+  return { rows, skipped };
+}
+
+/**
+ * Column indices for all four interbank interest-rate tables, which share a layout:
+ *
+ *   0 <post_type>_ID   1 date   2 rate
+ *
+ * Column 0 is wpDataTables' internal row id, not anything a caller wants, so it is
+ * dropped rather than surfaced as a field that invites use.
+ */
+export const INTEREST_RATE_COLUMNS = { date: 1, rate: 2 } as const;
+
+const MIN_INTEREST_ROW_LENGTH = 3;
+
+export interface ParsedInterestRates {
+  rows: InterestRatePoint[];
+  skipped: number;
+}
+
+export interface ParseInterestRateOptions {
+  /** Drop anything published before this ISO date. Applied here, not upstream. */
+  from?: string;
+}
+
+/**
+ * Normalizes an interbank interest-rate series into typed points, oldest first.
+ *
+ * Rows with a blank date are dropped and counted: the two MPC-derived series each
+ * carry a couple of them (a rate with no effective date is not placeable on a
+ * timeline), so `skipped` is expected to be non-zero for those and does not indicate
+ * a parsing fault.
+ */
+export function parseInterestRatePayload(
+  payload: unknown,
+  options: ParseInterestRateOptions = {},
+): ParsedInterestRates {
+  const data = extractDataArray(payload);
+
+  const rows: InterestRatePoint[] = [];
+  let skipped = 0;
+
+  for (const raw of data) {
+    if (!Array.isArray(raw) || raw.length < MIN_INTEREST_ROW_LENGTH) {
+      skipped++;
+      continue;
+    }
+
+    const date = parseBogDate(text(raw[INTEREST_RATE_COLUMNS.date]));
+    const rate = parseNumber(raw[INTEREST_RATE_COLUMNS.rate]);
+    if (!date || rate === null) {
+      skipped++;
+      continue;
+    }
+
+    // Filtered, not malformed — the window is applied after the fetch because these
+    // tables reject a date-range search.
+    if (options.from && date < options.from) continue;
+
+    rows.push({ date, rate });
+  }
+
+  rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   return { rows, skipped };
 }

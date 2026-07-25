@@ -91,6 +91,55 @@ export const FX_COLUMN_NAMES = [
   "vl_mid",
 ] as const;
 
+/**
+ * The four interbank interest-rate series, each its own table on one page.
+ *
+ * Column names differ per table because each is built over a different JetEngine
+ * post type, and wpDataTables rejects a query whose column names do not match. The
+ * two MPC-derived series share their column names exactly — the labels come from DOM
+ * containment, not from the column names, which cannot tell them apart.
+ */
+export const INTERBANK_SERIES = {
+  daily: {
+    tableId: BOG_TABLES.dailyInterestRates,
+    label: "Daily Interest Rates",
+    columnNames: [
+      "daily_interest_rate_ID",
+      "daily_interest_rate_meta_date",
+      "daily_interest_rate_meta_rate",
+    ],
+  },
+  weekly: {
+    tableId: BOG_TABLES.weeklyInterestRates,
+    label: "Weekly Interest Rates",
+    columnNames: [
+      "avg_interest_rate_ID",
+      "avg_interest_rate_meta_end_date",
+      "avg_interest_rate_meta_rate",
+    ],
+  },
+  "reverse-repo": {
+    tableId: BOG_TABLES.reverseRepoRates,
+    label: "Reverse Repo Rates",
+    columnNames: [
+      "mpc_rate_ID",
+      "mpc_rate_meta_mpc_rate_effective_date",
+      "mpc_rate_meta_mpc_rate_value",
+    ],
+  },
+  depo: {
+    tableId: BOG_TABLES.depoRates,
+    label: "Depo Rates",
+    columnNames: [
+      "mpc_rate_ID",
+      "mpc_rate_meta_mpc_rate_effective_date",
+      "mpc_rate_meta_mpc_rate_value",
+    ],
+  },
+} as const;
+
+export type InterbankSeries = keyof typeof INTERBANK_SERIES;
+
 /** Column names for the bill-rate tables (2 and 3), in index order. */
 export const BILL_RATE_COLUMN_NAMES = [
   "dt_issue_date",
@@ -367,6 +416,35 @@ export class BogClient {
     });
   }
 
+  /**
+   * One interbank interest-rate series, in full.
+   *
+   * **No upstream date filter**, unlike every other BoG table here. A range on the
+   * date column returns a nonsense response — `recordsFiltered: 3` with zero rows —
+   * on all four of these tables, so asking for one would quietly produce nothing.
+   *
+   * Fetching the whole series instead is cheap: the largest is 1712 rows and the
+   * smallest 119, against 144,457 for the FX table. The caller's window is applied in
+   * memory, which also means one cache entry per series serves every window.
+   */
+  async fetchInterbankInterestRates(series: InterbankSeries): Promise<unknown> {
+    const { tableId, columnNames, label } = INTERBANK_SERIES[series];
+    this.logger.info("bog: fetching interbank interest rates", { series, label, table: tableId });
+
+    const session = await this.createSession(BOG_PAGES.interbankInterestRates, [tableId]);
+
+    return this.fetchTable({
+      tableId,
+      session,
+      pagePath: BOG_PAGES.interbankInterestRates,
+      columnNames,
+      length: -1,
+      orderColumn: 1,
+      orderDir: "desc",
+      orderable: true,
+    });
+  }
+
   private notImplemented(dataset: string, page: keyof typeof BOG_PAGES): never {
     throw new NotImplementedError(
       `Bank of Ghana ${dataset} is not implemented yet. The data is published at ${this.pageUrl(page)}.`,
@@ -391,10 +469,6 @@ export class BogClient {
       days,
       now,
     });
-  }
-
-  async fetchInterbankInterestRates(): Promise<unknown> {
-    this.notImplemented("interbank interest rates", "interbankInterestRates");
   }
 
   async fetchExternalFacilities(): Promise<unknown> {

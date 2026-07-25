@@ -14,14 +14,14 @@ without restructuring anything — see [CONTRIBUTING.md](CONTRIBUTING.md).
 | Source                                | Prefix | Tools | Status | Covers                                                              |
 | ------------------------------------- | ------ | ----- | ------ | ------------------------------------------------------------------- |
 | [Ghana Stock Exchange](docs/GSE.md)   | `gse_` | 5     | live   | Share prices, company directory, market index, fixed-income issuers |
-| [Bank of Ghana](docs/BOG.md)          | `bog_` | 5     | 3 live, 2 stubs | Interbank FX rates incl. history to 1996, Treasury and BoG bill rates (live); interbank interest rates, external facilities (stubs) |
+| [Bank of Ghana](docs/BOG.md)          | `bog_` | 5     | 4 live, 1 stub | Interbank FX rates incl. history to 1996, Treasury and BoG bill rates, interbank money-market rates (live); external facilities (stub) |
 
 Each source has its own guide with a full tool reference, sample chat queries, and
 the data caveats specific to it. **Start with [docs/GSE.md](docs/GSE.md).**
 
-Of the Bank of Ghana tools, **interbank FX rates and the two bill-rate series
-work**; the other two are registered stubs whose names and inputs are final but
-which return an error when called. The weekly auction results are
+Of the Bank of Ghana tools, **all but external facilities work**; that one is a
+registered stub whose name and inputs are final but which returns an error when
+called. The weekly auction results are
 [out of scope](docs/BOG.md#the-auction-results-are-pdfs) — BoG publishes those only
 as PDFs. Note also the unresolved
 [TLS problem on BoG's server](docs/BOG.md#blocker-bogs-tls-chain-is-incomplete),
@@ -39,7 +39,8 @@ which stops the Workers runtime reaching bog.gov.gh at all.
 | [`bog_get_interbank_fx_rates`](docs/BOG.md#bog_get_interbank_fx_rates)        | Cedi interbank reference rates vs 19 currencies, latest or back to 1996 |
 | [`bog_get_treasury_bill_rates`](docs/BOG.md#bog_get_treasury_bill_rates-and-bog_get_central_bank_bill_rates) | GoG bill, note and bond rates by tender, back to 2013 |
 | [`bog_get_central_bank_bill_rates`](docs/BOG.md#bog_get_treasury_bill_rates-and-bog_get_central_bank_bill_rates) | Bank of Ghana's own bill rates, back to 2016 |
-| [`bog_*` (2 more)](docs/BOG.md#datasets-and-tools)                            | Interbank interest rates, external facilities — **stubs**      |
+| [`bog_get_interbank_interest_rates`](docs/BOG.md#bog_get_interbank_interest_rates) | Interbank weighted average, reverse repo and depo rates, to 2002 |
+| [`bog_list_external_facilities`](docs/BOG.md#datasets-and-tools)              | Externally funded facilities — **stub, returns an error**      |
 | `ping`                                                                       | Health check. No input; returns `{ ok, server, version }`      |
 
 `ping` is the only tool that belongs to no source — it touches nothing upstream,
@@ -270,12 +271,13 @@ read: price history, the company directory across all three boards, the market
 index, and GFIM fixed-income issuers — with fuzzy company search, caching, stale
 and seed fallbacks, rate limiting and logging.
 
-**Bank of Ghana — interbank FX and both bill-rate series live, two stubs.** bog.gov.gh turns out to run the
+**Bank of Ghana — four of five datasets live, one stub.** bog.gov.gh turns out to run the
 same wpDataTables plugin as GSE, exposing its nonce under a different input name, so
 the shared client in `lib/wpDataTables.ts` serves both. All eight rate tables are
 surveyed with row counts and spans in [docs/BOG.md](docs/BOG.md#the-tables-surveyed),
-and the bill-rate series are implemented with upstream date filtering. The four
-interbank interest-rate series carry deep history too and need only implementation.
+the bill-rate series use upstream date filtering, and the four interbank
+money-market series are windowed in memory because those tables reject a date-range
+search.
 
 Still blocked for the deployed path by
 [an incomplete TLS chain on bog.gov.gh](docs/BOG.md#blocker-bogs-tls-chain-is-incomplete):

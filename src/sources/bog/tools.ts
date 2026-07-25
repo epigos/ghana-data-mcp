@@ -5,10 +5,11 @@ import { readThrough, type Cache, type ReadThroughResult } from "../../lib/cache
 import { describeError } from "../../lib/errors.js";
 import { silentLogger, type Logger } from "../../lib/log.js";
 import { ResultMetaSchema, toolError, toolResult, type DataOrigin } from "../../lib/results.js";
-import { BogClient } from "./client.js";
+import { BogClient, INTERBANK_SERIES, type InterbankSeries } from "./client.js";
 import {
   parseBillRatePayload,
   parseInterbankFxPayload,
+  parseInterestRatePayload,
   resolveCurrencyPair,
   type ParsedFxRates,
 } from "./parser.js";
@@ -17,6 +18,7 @@ import {
   CEDI_REDENOMINATION_DATE,
   DEFAULT_DAYS,
   InterbankFxRateSchema,
+  InterestRatePointSchema,
   MAX_DAYS,
 } from "./types.js";
 
@@ -41,10 +43,19 @@ const FX_HISTORY_TTL_SECONDS = 12 * 60 * 60;
 const FX_HISTORY_MAX_ROWS = 20_000;
 
 /**
+ * Interest-rate series are cached whole, not per window.
+ *
+ * These tables reject a date-range search, so the fetch always returns the entire
+ * series and the window is applied in memory — which means one entry answers every
+ * `days` a caller might ask for. The largest series is 1712 rows.
+ */
+const INTEREST_RATE_TTL_SECONDS = 6 * 60 * 60;
+
+/**
  * MCP tool surface for Bank of Ghana data, namespaced `bog_`.
  *
- * Interbank FX rates and the two bill-rate series are implemented. The remaining
- * two are registered stubs:
+ * Everything except project administration and external facilities is implemented.
+ * That one remains a registered stub:
  * final input schemas and descriptions, but calling one returns an error. That
  * fixes the contract — names, inputs, which dataset belongs in which tool — before
  * the parsing work, and keeps the registration and docs scaffolding tested.
@@ -69,16 +80,6 @@ export interface BogDeps {
 
 const NOT_AVAILABLE = "NOT YET AVAILABLE (stub — returns an error).";
 
-const daysInput = (what: string) => ({
-  days: z
-    .number()
-    .int()
-    .min(1)
-    .max(MAX_DAYS)
-    .optional()
-    .describe(`Calendar days of ${what} to look back. Default ${DEFAULT_DAYS}.`),
-});
-
 interface StubDefinition {
   name: string;
   title: string;
@@ -90,22 +91,6 @@ interface StubDefinition {
 }
 
 const STUBS: readonly StubDefinition[] = [
-  {
-    name: "bog_get_interbank_interest_rates",
-    title: "Ghana interbank interest rates",
-    description:
-      "Bank of Ghana interbank market interest rates: the interbank weighted average rate, " +
-      "reverse repo rate and deposit rates, daily and weekly. Not the Monetary Policy " +
-      "Committee policy rate, which is published separately.",
-    inputSchema: {
-      ...daysInput("rate history"),
-      frequency: z
-        .enum(["daily", "weekly"])
-        .optional()
-        .describe("BoG publishes both. Default daily."),
-    },
-    probe: (client) => client.fetchInterbankInterestRates(),
-  },
   {
     name: "bog_list_external_facilities",
     title: "Project administration and external facilities",
@@ -235,6 +220,104 @@ export function registerBogTools(server: McpServer, deps: BogDeps): void {
         });
       } catch (error) {
         log.error("tool: bog_get_interbank_fx_rates failed", { reason: describeError(error) });
+        return toolError(describeError(error));
+      }
+    },
+  );
+
+  server.registerTool(
+    "bog_get_interbank_interest_rates",
+    {
+      title: "Ghana interbank interest rates",
+      description:
+        "Bank of Ghana interbank money-market interest rates, oldest first. Four separate " +
+        "series, chosen with `series`: `daily` is the daily interbank weighted average; " +
+        "`weekly` is its weekly average, dated by week ending; `reverse-repo` and `depo` are " +
+        "the Bank of Ghana's standing facility rates, which sit either side of the Monetary " +
+        "Policy Committee's policy rate. This is NOT the MPC policy rate itself, which BoG " +
+        "publishes separately and this server does not cover.",
+      inputSchema: {
+        series: z
+          .enum(["daily", "weekly", "reverse-repo", "depo"])
+          .optional()
+          .describe("Which series to return. Default daily."),
+        days: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_DAYS)
+          .optional()
+          .describe(
+            `Calendar days of history to return. Default ${DEFAULT_DAYS}. The daily and ` +
+              "weekly series start in 2019; the reverse-repo and depo series reach back to 2002.",
+          ),
+      },
+      outputSchema: {
+        series: z.string(),
+        seriesLabel: z.string().describe("The label BoG uses for this series on its own page."),
+        days: z.number(),
+        rowCount: z.number(),
+        rows: z.array(InterestRatePointSchema),
+        meta: ResultMetaSchema,
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ series, days }) => {
+      const chosen: InterbankSeries = series ?? "daily";
+      const requestedDays = days ?? DEFAULT_DAYS;
+      log.info("tool: bog_get_interbank_interest_rates", { series: chosen, days: requestedDays });
+
+      try {
+        // Cached whole, then windowed in memory: these tables reject a date-range
+        // search, so the fetch returns everything regardless of what was asked.
+        const key = `bog:interbank-interest:v1:${chosen}`;
+        const result = await readThrough(deps.cache, key, INTEREST_RATE_TTL_SECONDS, async () =>
+          parseInterestRatePayload(await deps.client.fetchInterbankInterestRates(chosen)),
+        );
+
+        const from = new Date(Date.now() - requestedDays * 24 * 60 * 60 * 1000)
+          .toISOString()
+          .slice(0, 10);
+        const { rows: allRows, skipped } = result.value;
+        const rows = allRows.filter((row) => row.date >= from);
+
+        log.info("tool: bog_get_interbank_interest_rates done", {
+          series: chosen,
+          rows: rows.length,
+          ofTotal: allRows.length,
+          skipped: skipped || undefined,
+          origin: result.origin,
+        });
+
+        const warnings: string[] = [];
+        if (result.origin === "stale-cache") {
+          warnings.push(
+            `bog.gov.gh could not be reached (${result.staleReason}); serving a cached copy from ${Math.round(result.ageSeconds / 3600)} hour(s) ago.`,
+          );
+        }
+        if (rows.length === 0 && allRows.length > 0) {
+          warnings.push(
+            `No ${INTERBANK_SERIES[chosen].label} published in the last ${requestedDays} days. The series runs ${allRows[0]?.date} to ${allRows.at(-1)?.date}; try a longer window.`,
+          );
+        }
+
+        return toolResult({
+          series: chosen,
+          seriesLabel: INTERBANK_SERIES[chosen].label,
+          days: requestedDays,
+          rowCount: rows.length,
+          rows,
+          meta: {
+            origin: result.origin as DataOrigin,
+            ageSeconds: result.ageSeconds,
+            // Blank-dated rows are normal in the MPC-derived series, so this is
+            // reported without being dressed up as a problem.
+            skippedRows: skipped,
+            ...(warnings.length > 0 ? { warning: warnings.join(" ") } : {}),
+          },
+        });
+      } catch (error) {
+        log.error("tool: bog_get_interbank_interest_rates failed", { reason: describeError(error) });
         return toolError(describeError(error));
       }
     },
@@ -426,5 +509,6 @@ export const BOG_TOOL_NAMES: readonly string[] = [
   "bog_get_interbank_fx_rates",
   "bog_get_treasury_bill_rates",
   "bog_get_central_bank_bill_rates",
+  "bog_get_interbank_interest_rates",
   ...BOG_STUB_TOOL_NAMES,
 ];

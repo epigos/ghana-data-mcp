@@ -5,6 +5,7 @@ import {
   parseBillRatePayload,
   parseBogDate,
   parseInterbankFxPayload,
+  parseInterestRatePayload,
   parseNumber,
   parseTenorDays,
   resolveCurrencyPair,
@@ -15,6 +16,8 @@ const fxPayload = fixtureJson<{ data: string[][] }>("bog-interbank-fx.json");
 const tbillPayload = fixtureJson<{ data: string[][] }>("bog-treasury-bill-rates.json");
 const bogBillPayload = fixtureJson<{ data: string[][] }>("bog-central-bank-bill-rates.json");
 const historyPayload = fixtureJson<{ data: string[][] }>("bog-historical-fx-usd.json");
+const dailyRatePayload = fixtureJson<{ data: string[][] }>("bog-interbank-daily.json");
+const repoRatePayload = fixtureJson<{ data: string[][] }>("bog-interbank-reverse-repo.json");
 
 describe("parseBogDate", () => {
   // BoG writes month names (`dd M yy` per its own table config), where GSE writes
@@ -317,5 +320,59 @@ describe("resolveCurrencyPair", () => {
     expect(resolveCurrencyPair("US Dollar")).toBeNull();
     expect(resolveCurrencyPair("Pound Sterling")).toBeNull();
     expect(resolveCurrencyPair("")).toBeNull();
+  });
+});
+
+describe("parseInterestRatePayload", () => {
+  it("maps the daily fixture onto typed points", () => {
+    const { rows, skipped } = parseInterestRatePayload(dailyRatePayload);
+
+    expect(skipped).toBe(0);
+    expect(rows).toHaveLength(dailyRatePayload.data.length);
+  });
+
+  it("reads only the date and rate, dropping the internal row id", () => {
+    // Fixture row: ['55,301', '24 Jul 2026', '10.23'] — column 0 is wpDataTables'
+    // own id, which no caller wants.
+    const { rows } = parseInterestRatePayload(dailyRatePayload);
+
+    expect(rows.at(-1)).toEqual({ date: "2026-07-24", rate: 10.23 });
+    expect(Object.keys(rows[0]!)).toEqual(["date", "rate"]);
+  });
+
+  it("sorts oldest first", () => {
+    const dates = parseInterestRatePayload(dailyRatePayload).rows.map((row) => row.date);
+    expect(dates).toEqual([...dates].sort());
+  });
+
+  // The MPC-derived series carry a couple of rows with no effective date. A rate that
+  // cannot be placed on a timeline is not usable, so it is dropped and counted.
+  it("drops undated rows and counts them", () => {
+    const { rows, skipped } = parseInterestRatePayload(repoRatePayload);
+
+    expect(skipped).toBe(2);
+    expect(rows).toHaveLength(repoRatePayload.data.length - 2);
+    expect(rows.every((row) => row.date !== "")).toBe(true);
+  });
+
+  it("applies a from-date in memory, without counting the excluded as malformed", () => {
+    const all = parseInterestRatePayload(dailyRatePayload);
+    const cut = all.rows.at(-3)!.date;
+    const windowed = parseInterestRatePayload(dailyRatePayload, { from: cut });
+
+    expect(windowed.rows.length).toBeLessThan(all.rows.length);
+    expect(windowed.rows.every((row) => row.date >= cut)).toBe(true);
+    expect(windowed.skipped).toBe(all.skipped);
+  });
+
+  it("drops rows that are the wrong shape", () => {
+    expect(parseInterestRatePayload({ data: [["1", "24 Jul 2026"], null, "x"] })).toEqual({
+      rows: [],
+      skipped: 3,
+    });
+  });
+
+  it("throws ParseError when the response is not a table payload", () => {
+    expect(() => parseInterestRatePayload({ rates: [] })).toThrow(ParseError);
   });
 });

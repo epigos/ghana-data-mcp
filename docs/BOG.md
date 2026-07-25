@@ -3,9 +3,9 @@
 Treasury and money-market data published by the Bank of Ghana at
 [bog.gov.gh](https://www.bog.gov.gh/treasury-and-the-markets/). Five tools.
 
-> **Status: 3 of 5 implemented.** Interbank FX rates and the two bill-rate series
-> work. The other two are registered stubs — final input schemas, but calling one
-> returns an error.
+> **Status: 4 of 5 implemented.** Everything except project administration and
+> external facilities, which remains a registered stub — final input schema, but
+> calling it returns an error.
 >
 > There is a certificate problem on BoG's server that stops the Workers runtime
 > fetching it at all — see [TLS blocker](#blocker-bogs-tls-chain-is-incomplete).
@@ -32,7 +32,7 @@ URLs were fetched and returned HTTP 200 on 2026-07-25.
 | `bog_get_interbank_fx_rates`           | Daily Interbank FX Rates                 | **live** |
 | `bog_get_treasury_bill_rates`          | Treasury Bill Rate                       | **live** |
 | `bog_get_central_bank_bill_rates`      | Bank of Ghana Bill Rates                 | **live** |
-| `bog_get_interbank_interest_rates`     | Interbank Interest Rates                 | stub   |
+| `bog_get_interbank_interest_rates`     | Interbank Interest Rates                 | **live** |
 | `bog_list_external_facilities`         | Project Administration & External Facilities | stub |
 
 Page URLs are in `BOG_PAGES` in `src/sources/bog/client.ts`.
@@ -61,13 +61,13 @@ The input contracts are final and can be coded against now:
 | -------------------------------------- | ------------------------------------------------- |
 | `bog_get_interbank_fx_rates`           | `currency` only — **no date window**, see below   |
 | Bill rates                             | `days` (default 90, max 7300) plus `securityType` |
-| `bog_get_interbank_interest_rates`     | `days`, plus `frequency` — `daily` or `weekly`    |
+| `bog_get_interbank_interest_rates`     | `days`, plus `series` — one of four               |
 | `bog_get_interbank_interest_rates`     | plus `frequency` — `daily` or `weekly`            |
 | `bog_list_external_facilities`         | `refresh`                                         |
 
 ### Outputs
 
-The three implemented tools declare a full `outputSchema`. The four stubs declare
+The four implemented tools declare a full `outputSchema`. The remaining stub declares
 none: their row shapes land with each implementation, once the real payload is in
 hand. Publishing a guessed schema would invite callers to code against fields that
 may not survive contact with the data — worse than publishing nothing.
@@ -262,6 +262,73 @@ broader than its name.
 `securityType: "7 YR"` with a long window. The most recent as of 2026-07-25 was
 26 Aug 2013 at 17.5% — a good check that the model reports the date rather than
 implying the rate is current.
+
+### `bog_get_interbank_interest_rates`
+
+Four separate money-market series, one page, one table each.
+
+| Input    | Type   | Notes                                                          |
+| -------- | ------ | -------------------------------------------------------------- |
+| `series` | enum   | `daily`, `weekly`, `reverse-repo`, `depo`. Default `daily`.      |
+| `days`   | number | Calendar days back. Default 90, max 7300.                      |
+
+```json
+{ "date": "2026-07-24", "rate": 10.23 }
+```
+
+Real coverage on 2026-07-25:
+
+| `series`       | BoG's label            | Table | Rows | Span                  | Latest |
+| -------------- | ---------------------- | ----- | ---- | --------------------- | ------ |
+| `daily`        | Daily Interest Rates   | 69    | 1712 | 2019-08-05 → 2026-07-24 | 10.23  |
+| `weekly`       | Weekly Interest Rates  | 70    | 362  | 2019-07-26 → 2026-07-24 | 10.23  |
+| `reverse-repo` | Reverse Repo Rates     | 62    | 117  | 2002-11-21 → 2026-07-22 | 15.00  |
+| `depo`         | Depo Rates             | 63    | 117  | 2002-11-21 → 2026-07-22 | 13.00  |
+
+`daily` and `weekly` are the interbank weighted average — the rate banks actually lend
+to each other at — the second being the first averaged over a week, and dated by week
+ending rather than effective date. `reverse-repo` and `depo` are BoG's standing
+facility rates, which sit either side of the Monetary Policy Committee's policy rate:
+15.00 and 13.00 around a 14.00 policy rate as of 2026-07-25.
+
+**This is not the MPC policy rate.** BoG publishes that separately and this server does
+not cover it. A question about "Ghana's interest rate" most often means the policy rate,
+so the honest answer names which of these it is quoting.
+
+Three implementation notes:
+
+- **The window is applied in memory.** Alone among BoG's tables, these four reject a
+  date-range search: a range returns `recordsFiltered: 3` with zero rows. So the fetch
+  takes the whole series — 1712 rows at most, against 144,457 for the FX table — and
+  narrows it here. One cache entry per series therefore answers every `days`.
+- **`skippedRows: 2` is normal for `reverse-repo` and `depo`.** Both carry two rows with
+  no effective date. A rate that cannot be placed on a timeline is not usable, so it is
+  dropped and counted rather than silently included.
+- **Column names differ per series**, because each table is built over a different
+  JetEngine post type and wpDataTables rejects a mismatched query. The two MPC-derived
+  series share their column names exactly, so those cannot tell them apart — the
+  labels come from DOM containment instead.
+
+#### Sample chat queries
+
+> **What's the interbank interest rate in Ghana right now?**
+
+Default series, short window. The answer should say it is the interbank weighted
+average, not the policy rate.
+
+> **How has Ghana's interbank rate moved over the past year?**
+
+`days: 365`. About 250 points on the daily series, or 52 on the weekly.
+
+> **What's the gap between the Bank of Ghana's reverse repo and depo rates?**
+
+Two calls. On 2026-07-25: 15.00 and 13.00, a two-point corridor around the 14.00 policy
+rate. A good check that the model does not present either as *the* policy rate.
+
+> **When did Ghana's reverse repo rate peak?**
+
+`series: "reverse-repo", days: 7300` reaches 2002. Also exercises the undated-row
+handling, since `meta.skippedRows` will be 2.
 
 ## Blocker: BoG's TLS chain is incomplete
 
