@@ -1,8 +1,19 @@
 import { ParseError, UpstreamError } from "../../lib/errors.js";
 import { cookieHeaderFrom, request, type RequestOptions } from "../../lib/http.js";
 import { silentLogger, type Logger } from "../../lib/log.js";
-import { extractNonces } from "./parser.js";
+import {
+  buildDataTablesBody,
+  extractTableNonces,
+  nonceFor,
+  summarizeTablePayload,
+  type TableSession,
+} from "../../lib/wpDataTables.js";
 import { MAX_HISTORY_DAYS, type Market } from "./types.js";
+
+// gse.com.gh exposes its table nonces as wdtNonceFrontendEdit_<id>.
+const GSE_NONCE_FLAVOUR = "frontendEdit" as const;
+
+export { buildDataTablesBody, nonceFor };
 
 /**
  * Raw access to gse.com.gh. Knows the two-step handshake and nothing about MCP,
@@ -55,25 +66,10 @@ export const COMPANY_TABLES: ReadonlyArray<{ tableId: number; market: Market }> 
 ];
 
 /**
- * A page's cookie plus every table nonce taken from it.
- *
- * Nonces are per-table but issued per-page-load, so one handshake serves any
- * number of tables on that page — which is what keeps the three-table company
- * directory down to a single page fetch.
+ * A page's cookie plus every table nonce taken from it. Structurally the shared
+ * wpDataTables session; aliased so existing GSE call sites keep reading naturally.
  */
-export interface GseSession {
-  cookie: string;
-  nonces: Record<number, string>;
-}
-
-/** Nonce for a table, or a clear failure if the handshake did not include it. */
-export function nonceFor(session: GseSession, tableId: number): string {
-  const nonce = session.nonces[tableId];
-  if (!nonce) {
-    throw new UpstreamError(`session has no nonce for table ${tableId}`);
-  }
-  return nonce;
-}
+export type GseSession = TableSession;
 
 export interface GseClientOptions extends RequestOptions {
   baseUrl?: string;
@@ -117,7 +113,7 @@ export class GseClient {
     }
 
     const html = await response.text();
-    const nonces = extractNonces(html, tableIds);
+    const nonces = extractTableNonces(html, tableIds, GSE_NONCE_FLAVOUR);
 
     this.logger.info("gse: session created", {
       page: pagePath,
@@ -389,34 +385,6 @@ export class GseClient {
   }
 }
 
-/**
- * The counts wpDataTables reports alongside the rows.
- *
- * It sends them as JSON *strings* (`"recordsTotal": "183595"`) even though the
- * DataTables protocol specifies numbers, so both forms are accepted — reading
- * only numbers would silently drop the counts and disable the truncation check.
- */
-function summarizeTablePayload(payload: unknown): {
-  rows?: number;
-  recordsTotal?: number;
-  recordsFiltered?: number;
-} {
-  if (!payload || typeof payload !== "object") return {};
-  const table = payload as { data?: unknown; recordsTotal?: unknown; recordsFiltered?: unknown };
-  return {
-    rows: Array.isArray(table.data) ? table.data.length : undefined,
-    recordsTotal: asCount(table.recordsTotal),
-    recordsFiltered: asCount(table.recordsFiltered),
-  };
-}
-
-function asCount(value: unknown): number | undefined {
-  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
-  if (typeof value !== "string" || value.trim() === "") return undefined;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
 /** Column names for the daily-price table (39), in index order. */
 export const PRICE_COLUMN_NAMES = ["wdt_ID", "dailydate", "sharecode"] as const;
 
@@ -467,55 +435,4 @@ function formatDayFirst(date: Date): string {
   const day = String(date.getUTCDate()).padStart(2, "0");
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   return `${day}/${month}/${date.getUTCFullYear()}`;
-}
-
-/**
- * Builds the DataTables server-side form payload. Every column the query
- * touches has to be declared, in order and from index 0, or wpDataTables
- * ignores the searches on the ones that follow a gap.
- */
-export function buildDataTablesBody(params: {
-  columnNames: readonly string[];
-  columnSearches?: Record<number, { value: string; regex?: boolean }>;
-  length: number;
-  orderColumn: number;
-  orderDir: "asc" | "desc";
-  rangeSeparator?: string;
-  nonce: string;
-}): string {
-  const {
-    columnNames,
-    columnSearches = {},
-    length,
-    orderColumn,
-    orderDir,
-    rangeSeparator,
-    nonce,
-  } = params;
-  const highestSearched = Math.max(-1, ...Object.keys(columnSearches).map(Number));
-  const columnCount = Math.max(columnNames.length, highestSearched + 1);
-
-  const form = new URLSearchParams();
-  form.set("draw", "1");
-
-  for (let index = 0; index < columnCount; index++) {
-    const search = columnSearches[index];
-    form.set(`columns[${index}][data]`, String(index));
-    form.set(`columns[${index}][name]`, columnNames[index] ?? `column_${index}`);
-    form.set(`columns[${index}][searchable]`, "true");
-    form.set(`columns[${index}][orderable]`, "true");
-    form.set(`columns[${index}][search][value]`, search?.value ?? "");
-    form.set(`columns[${index}][search][regex]`, String(search?.regex ?? false));
-  }
-
-  form.set("order[0][column]", String(orderColumn));
-  form.set("order[0][dir]", orderDir);
-  form.set("start", "0");
-  form.set("length", String(length));
-  form.set("search[value]", "");
-  form.set("search[regex]", "false");
-  form.set("wdtNonce", nonce);
-  if (rangeSeparator) form.set("sRangeSeparator", rangeSeparator);
-
-  return form.toString();
 }

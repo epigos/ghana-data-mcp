@@ -3,10 +3,19 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describe, expect, it } from "vitest";
 
-import { createCache, createMemoryKV } from "../../../src/lib/cache.js";
+import { createCache, createMemoryKV, type Cache } from "../../../src/lib/cache.js";
 import { BOG_PAGES, BogClient } from "../../../src/sources/bog/client.js";
-import { BOG_TOOL_NAMES, registerBogTools } from "../../../src/sources/bog/tools.js";
-import { stubFetch } from "../../helpers/stubFetch.js";
+import { InterbankFxRateSchema } from "../../../src/sources/bog/types.js";
+import {
+  BOG_STUB_TOOL_NAMES,
+  BOG_TOOL_NAMES,
+  registerBogTools,
+} from "../../../src/sources/bog/tools.js";
+import { fixture, fixtureJson } from "../../helpers/fixtures.js";
+import { errorResponse, htmlResponse, jsonResponse, stubFetch } from "../../helpers/stubFetch.js";
+
+const fxPageHtml = fixture("bog-interbank-fx.trimmed.html");
+const fxPayload = fixtureJson("bog-interbank-fx.json");
 
 interface ToolResult {
   isError?: boolean;
@@ -26,6 +35,31 @@ async function harness() {
   registerBogTools(server, {
     client: new BogClient({ fetchImpl, baseDelayMs: 0, retries: 0 }),
     cache: createCache(createMemoryKV()),
+  });
+
+  const client = new Client({ name: "test-client", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+
+  return { client, calls };
+}
+
+/** Harness with the FX routes wired, for the one implemented tool. */
+async function fxHarness(
+  options: { tableResponses?: Array<() => Response>; cache?: Cache } = {},
+) {
+  const { fetch: fetchImpl, calls } = stubFetch([
+    { match: "/daily-interbank-fx-rates/", responses: [() => htmlResponse(fxPageHtml, [])] },
+    {
+      match: "table_id=31",
+      responses: options.tableResponses ?? [() => jsonResponse(fxPayload)],
+    },
+  ]);
+
+  const server = new McpServer({ name: "test", version: "0.0.0" });
+  registerBogTools(server, {
+    client: new BogClient({ fetchImpl, baseDelayMs: 0, retries: 0 }),
+    cache: options.cache ?? createCache(createMemoryKV()),
   });
 
   const client = new Client({ name: "test-client", version: "0.0.0" });
@@ -79,25 +113,32 @@ describe("BoG tool registration", () => {
 
   // A model reading the tool list should be able to skip these without calling
   // one and burning a turn.
-  it("says up front in the description that it is not available", async () => {
+  it("says up front in the description which tools are not available", async () => {
     const { client } = await harness();
     for (const tool of (await client.listTools()).tools) {
-      expect(tool.description, tool.name).toMatch(/^NOT YET AVAILABLE/);
+      const isStub = BOG_STUB_TOOL_NAMES.includes(tool.name);
+      expect(/^NOT YET AVAILABLE/.test(tool.description ?? ""), tool.name).toBe(isStub);
     }
   });
 
   // The row shape is unknown until the real payload is; declaring a guess would
   // have callers coding against fields that may not survive contact with it.
-  it("declares no output schema yet", async () => {
+  // Stubs have no output schema — the row shape is unknown until the real payload
+  // is. An implemented tool must have one.
+  it("declares an output schema only where the shape is known", async () => {
     const { client } = await harness();
     for (const tool of (await client.listTools()).tools) {
-      expect(tool.outputSchema, tool.name).toBeUndefined();
+      if (BOG_STUB_TOOL_NAMES.includes(tool.name)) {
+        expect(tool.outputSchema, tool.name).toBeUndefined();
+      } else {
+        expect(tool.outputSchema, tool.name).toBeDefined();
+      }
     }
   });
 });
 
 describe("BoG stub behaviour", () => {
-  it.each([...BOG_TOOL_NAMES])("%s reports an error rather than data", async (name) => {
+  it.each([...BOG_STUB_TOOL_NAMES])("%s reports an error rather than data", async (name) => {
     const { client } = await harness();
     const result = await call(client, name);
 
@@ -107,7 +148,7 @@ describe("BoG stub behaviour", () => {
 
   // This is the failure mode that matters: `rows: []` reads as "there is no such
   // data", which is a different and false claim from "I cannot fetch it".
-  it.each([...BOG_TOOL_NAMES])("%s never returns an empty result set", async (name) => {
+  it.each([...BOG_STUB_TOOL_NAMES])("%s never returns an empty result set", async (name) => {
     const { client } = await harness();
     const result = await call(client, name);
 
@@ -117,7 +158,7 @@ describe("BoG stub behaviour", () => {
 
   // These are interest rates and exchange rates. A plausible-looking number
   // recalled from training data is worse than no answer.
-  it.each([...BOG_TOOL_NAMES])("%s tells the model not to answer from memory", async (name) => {
+  it.each([...BOG_STUB_TOOL_NAMES])("%s tells the model not to answer from memory", async (name) => {
     const { client } = await harness();
     const text = (await call(client, name)).content[0]?.text ?? "";
 
@@ -131,7 +172,6 @@ describe("BoG stub behaviour", () => {
     const cases: Array<[string, string]> = [
       ["bog_get_treasury_bill_rates", BOG_PAGES.treasuryBillRates],
       ["bog_get_central_bank_bill_rates", BOG_PAGES.centralBankBillRates],
-      ["bog_get_interbank_fx_rates", BOG_PAGES.interbankFxRates],
       ["bog_get_interbank_interest_rates", BOG_PAGES.interbankInterestRates],
       ["bog_get_treasury_auction_results", BOG_PAGES.treasuryAuctionResults],
       ["bog_get_central_bank_auction_results", BOG_PAGES.centralBankAuctionResults],
@@ -146,7 +186,7 @@ describe("BoG stub behaviour", () => {
 
   it("makes no upstream request at all", async () => {
     const { client, calls } = await harness();
-    for (const name of BOG_TOOL_NAMES) await call(client, name);
+    for (const name of BOG_STUB_TOOL_NAMES) await call(client, name);
 
     expect(calls).toHaveLength(0);
   });
@@ -192,5 +232,112 @@ describe("BoG stub inputs", () => {
     const result = await call(client, "bog_get_treasury_auction_results", { limit: 4 });
 
     expect(result.content[0]?.text).toMatch(/not implemented yet/i);
+  });
+});
+
+interface FxPayload {
+  date: string;
+  rateCount: number;
+  rates: Array<{ currency: string; code: string; pair: string; bid: number; offer: number; mid: number }>;
+  meta: { origin: string; warning?: string };
+}
+
+describe("bog_get_interbank_fx_rates", () => {
+  it("returns every published currency, matching the row schema", async () => {
+    const { client } = await fxHarness();
+    const result = await call(client, "bog_get_interbank_fx_rates");
+    const payload = result.structuredContent as unknown as FxPayload;
+
+    expect(result.isError).toBeFalsy();
+    expect(payload.meta.origin).toBe("live");
+    expect(payload.rateCount).toBe(payload.rates.length);
+    expect(payload.rateCount).toBe(19);
+    expect(payload.date).toBe("2026-07-24");
+    for (const rate of payload.rates) {
+      expect(() => InterbankFxRateSchema.parse(rate)).not.toThrow();
+    }
+  });
+
+  it("reads bid, offer and mid for the dollar", async () => {
+    const { client } = await fxHarness();
+    const payload = (await call(client, "bog_get_interbank_fx_rates"))
+      .structuredContent as unknown as FxPayload;
+    const usd = payload.rates.find((rate) => rate.code === "USD");
+
+    expect(usd).toEqual({
+      date: "2026-07-24",
+      currency: "US Dollar",
+      code: "USD",
+      pair: "USDGHS",
+      bid: 11.6292,
+      offer: 11.6408,
+      mid: 11.635,
+    });
+  });
+
+  it("filters by currency code", async () => {
+    const { client } = await fxHarness();
+    const payload = (await call(client, "bog_get_interbank_fx_rates", { currency: "GBP" }))
+      .structuredContent as unknown as FxPayload;
+
+    expect(payload.rateCount).toBe(1);
+    expect(payload.rates[0]?.pair).toBe("GBPGHS");
+  });
+
+  it("also accepts the published currency name, case-insensitively", async () => {
+    const { client } = await fxHarness();
+    const payload = (await call(client, "bog_get_interbank_fx_rates", { currency: "us dollar" }))
+      .structuredContent as unknown as FxPayload;
+
+    expect(payload.rates[0]?.code).toBe("USD");
+  });
+
+  it("explains an unmatched currency rather than returning a bare empty list", async () => {
+    const { client } = await fxHarness();
+    const payload = (await call(client, "bog_get_interbank_fx_rates", { currency: "XYZ" }))
+      .structuredContent as unknown as FxPayload;
+
+    expect(payload.rateCount).toBe(0);
+    expect(payload.meta.warning).toMatch(/No interbank rate published for "XYZ"/);
+  });
+
+  // The upstream returns all 19 rows whatever we ask for, so one cache entry
+  // serves every currency query — a per-currency key would multiply the scrapes.
+  it("serves a filtered query from the same cache entry", async () => {
+    const { client, calls } = await fxHarness();
+
+    await call(client, "bog_get_interbank_fx_rates");
+    const afterFirst = calls.length;
+    const second = await call(client, "bog_get_interbank_fx_rates", { currency: "EUR" });
+
+    expect(calls.length).toBe(afterFirst);
+    expect((second.structuredContent as unknown as FxPayload).meta.origin).toBe("cache");
+  });
+
+  it("takes two upstream requests: the nonce page, then the table", async () => {
+    const { client, calls } = await fxHarness();
+    await call(client, "bog_get_interbank_fx_rates");
+
+    expect(calls.filter((c) => c.method === "GET")).toHaveLength(1);
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+    expect(calls[1]?.url).toContain("table_id=31");
+  });
+
+  // bog.gov.gh accepts the nonce without a cookie, unlike gse.com.gh — verified
+  // live. The fixture page therefore sets none, and this must still work.
+  it("works when the page sets no cookie", async () => {
+    const { client, calls } = await fxHarness();
+    const result = await call(client, "bog_get_interbank_fx_rates");
+
+    expect(result.isError).toBeFalsy();
+    expect(calls[1]?.headers.get("cookie")).toBeNull();
+  });
+
+  it("reports an upstream failure as a tool error", async () => {
+    const { client } = await fxHarness({ tableResponses: [() => errorResponse(503)] });
+    const result = await call(client, "bog_get_interbank_fx_rates");
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toMatch(/503/);
   });
 });

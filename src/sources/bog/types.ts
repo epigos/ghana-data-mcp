@@ -1,9 +1,11 @@
+import { z } from "zod";
+
 /**
  * Bank of Ghana types.
  *
- * Only the request-side bounds are settled. The row schemas for each dataset land
- * with their implementation, once the real payloads are known — see the note in
- * tools.ts on why guessing an output shape now would be a disservice to callers.
+ * Row schemas land with each dataset's implementation, once the real payload is
+ * known — see the note in tools.ts on why guessing an output shape would be a
+ * disservice to callers.
  *
  * The shared result envelope (`ResultMetaSchema`, `DataOrigin`) comes from
  * lib/results.ts and applies here unchanged.
@@ -14,3 +16,23 @@ export const DEFAULT_DAYS = 90;
 
 /** Default number of auctions returned by the auction-result tools. */
 export const DEFAULT_AUCTION_LIMIT = 12;
+
+/**
+ * One interbank reference rate for the cedi against another currency.
+ *
+ * These are the Bank of Ghana's official interbank reference rates, quoted as
+ * cedi per unit of the foreign currency. They are not retail or forex-bureau
+ * rates, which are usually worse and differ between providers.
+ */
+export const InterbankFxRateSchema = z.object({
+  date: z.string().describe("Publication date, ISO 8601 (YYYY-MM-DD)."),
+  currency: z.string().describe("Currency name as BoG publishes it, e.g. US Dollar."),
+  code: z
+    .string()
+    .describe("Currency code taken from the pair, e.g. USD. Not always ISO 4217 — see `pair`."),
+  pair: z.string().describe("Currency pair as published, e.g. USDGHS."),
+  bid: z.number().describe("Bid rate: cedis per unit of the foreign currency."),
+  offer: z.number().describe("Offer (ask) rate: cedis per unit of the foreign currency."),
+  mid: z.number().describe("Mid rate — the one to quote if only one number is wanted."),
+});
+export type InterbankFxRate = z.infer<typeof InterbankFxRateSchema>;

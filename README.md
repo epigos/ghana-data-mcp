@@ -14,15 +14,16 @@ without restructuring anything — see [CONTRIBUTING.md](CONTRIBUTING.md).
 | Source                                | Prefix | Tools | Status | Covers                                                              |
 | ------------------------------------- | ------ | ----- | ------ | ------------------------------------------------------------------- |
 | [Ghana Stock Exchange](docs/GSE.md)   | `gse_` | 5     | live   | Share prices, company directory, market index, fixed-income issuers |
-| [Bank of Ghana](docs/BOG.md)          | `bog_` | 7     | stubs  | T-bill and BoG bill rates, interbank FX and interest rates, auction results, external facilities |
+| [Bank of Ghana](docs/BOG.md)          | `bog_` | 7     | 1 live, 6 stubs | Interbank FX rates (live); T-bill and BoG bill rates, interbank interest rates, auction results, external facilities (stubs) |
 
 Each source has its own guide with a full tool reference, sample chat queries, and
 the data caveats specific to it. **Start with [docs/GSE.md](docs/GSE.md).**
 
-The Bank of Ghana tools are **registered stubs**: the names and inputs are final,
-but calling one returns an error — no BoG data is served yet, and there is an
-unresolved [TLS problem on BoG's server](docs/BOG.md#blocker-bogs-tls-chain-is-incomplete)
-to settle first.
+Of the Bank of Ghana tools, **interbank FX rates work**; the other six are
+registered stubs whose names and inputs are final but which return an error when
+called. Note also the unresolved
+[TLS problem on BoG's server](docs/BOG.md#blocker-bogs-tls-chain-is-incomplete),
+which stops the Workers runtime reaching bog.gov.gh at all.
 
 ## Tools
 
@@ -33,7 +34,8 @@ to settle first.
 | [`gse_search_company`](docs/GSE.md#gse_search_company)                        | Best-matching companies for a name, with a confidence score   |
 | [`gse_get_market_index`](docs/GSE.md#gse_get_market_index)                    | Market-wide daily GSE-CI, market cap, GSE-FSI and volume      |
 | [`gse_list_fixed_income_issuers`](docs/GSE.md#gse_list_fixed_income_issuers)  | Corporate bond issuers on the Ghana Fixed Income Market       |
-| [`bog_*` (7 tools)](docs/BOG.md#datasets-and-tools)                           | Bank of Ghana treasury data — **stubs, return an error**       |
+| [`bog_get_interbank_fx_rates`](docs/BOG.md#bog_get_interbank_fx_rates)        | Cedi interbank reference rates vs 19 currencies, latest day    |
+| [`bog_*` (6 more)](docs/BOG.md#datasets-and-tools)                            | Bank of Ghana treasury data — **stubs, return an error**       |
 | `ping`                                                                       | Health check. No input; returns `{ ok, server, version }`      |
 
 `ping` is the only tool that belongs to no source — it touches nothing upstream,
@@ -264,11 +266,17 @@ read: price history, the company directory across all three boards, the market
 index, and GFIM fixed-income issuers — with fuzzy company search, caching, stale
 and seed fallbacks, rate limiting and logging.
 
-**Bank of Ghana — stubs.** Seven tools registered with final inputs, all returning
-errors. The dataset URLs and the WordPress REST collections behind them are mapped
-and canary-tested; no parsing is written. Blocked on
-[an incomplete TLS chain on bog.gov.gh](docs/BOG.md#blocker-bogs-tls-chain-is-incomplete),
-which stops both Node and the Workers runtime from fetching it at all.
+**Bank of Ghana — interbank FX live, six stubs.** bog.gov.gh turns out to run the
+same wpDataTables plugin as GSE, exposing its nonce under a different input name, so
+the shared client in `lib/wpDataTables.ts` serves both. All eight rate tables are
+surveyed with row counts and spans in [docs/BOG.md](docs/BOG.md#the-tables-surveyed),
+and the bill-rate and interbank series carry deep history — those need no further
+discovery, only implementation.
+
+Still blocked for the deployed path by
+[an incomplete TLS chain on bog.gov.gh](docs/BOG.md#blocker-bogs-tls-chain-is-incomplete):
+the Workers runtime cannot reach it, so the FX tool is verified by unit tests and a
+live Node canary rather than through a Worker.
 
 Further sources — Ghana Statistical Service indicators, for instance — are what the
 namespacing exists for; see [CONTRIBUTING.md](CONTRIBUTING.md) for the walkthrough.

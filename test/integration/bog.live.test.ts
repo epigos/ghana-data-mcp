@@ -1,28 +1,32 @@
 import { describe, expect, it } from "vitest";
 
 import { request, USER_AGENT } from "../../src/lib/http.js";
-import { BOG_BASE_URL, BOG_PAGES, BOG_REST_COLLECTIONS } from "../../src/sources/bog/client.js";
+import {
+  BOG_BASE_URL,
+  BOG_PAGES,
+  BOG_REST_COLLECTIONS,
+  BogClient,
+} from "../../src/sources/bog/client.js";
+import { parseInterbankFxPayload } from "../../src/sources/bog/parser.js";
 
 /**
  * Live canary for the Bank of Ghana source.
  *
- * Nothing is implemented yet, so there is no parsing to verify. What these tests
- * protect is the mapping in client.ts: seven dataset URLs and the REST collections
- * that look like they back them.
+ * These protect two things: the mapping in client.ts (seven dataset URLs and the
+ * REST collections behind them), and the one implemented dataset — interbank FX,
+ * including the evidence that its table is restricted to a single date, which is
+ * why that tool takes no date range.
  *
  * ## Why this has its own env var instead of riding on GSE_LIVE
  *
- * These tests currently **fail from Node**, and not because of anything in this
- * repo: www.bog.gov.gh serves only its leaf certificate and omits the DigiCert
- * intermediate, so any client that does not chase the missing issuer rejects the
- * chain. Node/undici reports `UNABLE_TO_VERIFY_LEAF_SIGNATURE`; `curl` on macOS
- * succeeds only because the OS fills the gap.
+ * www.bog.gov.gh serves only its leaf certificate and omits the DigiCert
+ * intermediate, so a client that does not chase the missing issuer rejects the
+ * chain. Node reports `UNABLE_TO_VERIFY_LEAF_SIGNATURE` unless the intermediate is
+ * supplied, which is a per-machine setup step rather than something the repo can
+ * carry. Running these on the twice-weekly canary would leave it permanently red
+ * over a defect on BoG's server, so they are opt-in:
  *
- * Running them on the twice-weekly canary would mean a permanently red workflow
- * reporting a defect on BoG's server that we cannot fix, which trains everyone to
- * ignore it. So they are opt-in:
- *
- *   BOG_LIVE=1 npm run test:live:bog
+ *   NODE_EXTRA_CA_CERTS=/path/to/bog-intermediate.pem npm run test:live:bog
  *
  * Once BoG serves a complete chain, this can be folded back into GSE_LIVE and the
  * canary. See docs/BOG.md for the full diagnosis.
@@ -57,6 +61,38 @@ describe.skipIf(!live)("bog.gov.gh (live)", () => {
     },
     45_000,
   );
+
+  it("still returns parseable interbank FX rates", async () => {
+    const client = new BogClient({ timeoutMs: 30_000, retries: 1 });
+    const { rows, skipped } = parseInterbankFxPayload(await client.fetchInterbankFxRates());
+
+    expect(skipped).toBe(0);
+    expect(rows.length).toBeGreaterThan(10);
+
+    const usd = rows.find((row) => row.code === "USD");
+    expect(usd?.currency).toMatch(/dollar/i);
+    expect(usd?.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // A sanity band, not a forecast: if USD/GHS leaves this range the parser is
+    // far more likely wrong than the cedi.
+    expect(usd?.mid).toBeGreaterThan(1);
+    expect(usd?.mid).toBeLessThan(1000);
+    expect(usd?.bid).toBeLessThanOrEqual(usd?.offer ?? 0);
+  }, 60_000);
+
+  // The tool takes no date range because the table refuses to give one. If BoG
+  // ever lifts that, this fails and the tool can grow a `days` input.
+  it("still restricts the FX table to a single date", async () => {
+    const client = new BogClient({ timeoutMs: 30_000, retries: 1 });
+    const payload = (await client.fetchInterbankFxRates()) as {
+      recordsTotal?: unknown;
+      recordsFiltered?: unknown;
+      data: unknown[][];
+    };
+
+    expect(Number(payload.recordsFiltered)).toBe(payload.data.length);
+    expect(Number(payload.recordsTotal)).toBeGreaterThan(Number(payload.recordsFiltered));
+    expect(new Set(payload.data.map((row) => row[0])).size).toBe(1);
+  }, 60_000);
 
   it("serves bog.gov.gh to our identifying User-Agent", async () => {
     const response = await request(

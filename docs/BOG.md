@@ -3,9 +3,8 @@
 Treasury and money-market data published by the Bank of Ghana at
 [bog.gov.gh](https://www.bog.gov.gh/treasury-and-the-markets/). Seven tools.
 
-> **Status: stubs.** Every tool below is registered with its final input schema,
-> but calling one returns an error. No Bank of Ghana data is available from this
-> server yet.
+> **Status: 1 of 7 implemented.** Interbank FX rates work. The other six are
+> registered stubs — final input schemas, but calling one returns an error.
 >
 > There is a certificate problem on BoG's server that stops the Workers runtime
 > fetching it at all — see [TLS blocker](#blocker-bogs-tls-chain-is-incomplete).
@@ -15,7 +14,8 @@ Treasury and money-market data published by the Bank of Ghana at
 - [Datasets and tools](#datasets-and-tools)
 - [Blocker: BoG's TLS chain is incomplete](#blocker-bogs-tls-chain-is-incomplete)
 - [What the upstream looks like](#what-the-upstream-looks-like)
-  - [The rate pages](#the-rate-pages-plain-html-tables-not-gse-style-wpdatatables)
+  - [The rate pages are wpDataTables](#the-rate-pages-are-wpdatatables-after-all)
+  - [The tables, surveyed](#the-tables-surveyed)
   - [The auction results are PDFs](#the-auction-results-are-pdfs)
   - [The REST API](#the-rest-api-a-good-index-not-a-data-source)
 - [Implementing a dataset](#implementing-a-dataset)
@@ -26,15 +26,18 @@ Treasury and money-market data published by the Bank of Ghana at
 One tool per dataset in BoG's Treasury and the Markets section. All seven page
 URLs were fetched and returned HTTP 200 on 2026-07-25.
 
-| Tool                                    | Dataset                                  | Page                                                                |
-| --------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------- |
-| `bog_get_treasury_bill_rates`           | Treasury Bill Rate                       | `/treasury-and-the-markets/treasury-bill-rates/`                    |
-| `bog_get_central_bank_bill_rates`       | Bank of Ghana Bill Rates                 | `/treasury-and-the-markets/bank-of-ghana-bill-rates/`               |
-| `bog_get_interbank_fx_rates`            | Daily Interbank FX Rates                 | `/treasury-and-the-markets/daily-interbank-fx-rates/`               |
-| `bog_get_interbank_interest_rates`      | Interbank Interest Rates                 | `/treasury-and-the-markets/interbank-interest-rates/`               |
-| `bog_get_treasury_auction_results`      | Weekly GOG T-Bill Auction Results        | `/gog_auction_results/`                                             |
-| `bog_get_central_bank_auction_results`  | Weekly BOG Bill Auction Results          | `/bog_auction_results/`                                             |
-| `bog_list_external_facilities`          | Project Administration & External Facilities | `/treasury-and-the-markets/project-administration-and-external-facilities/` |
+| Tool                                   | Dataset                                  | Status |
+| -------------------------------------- | ---------------------------------------- | ------ |
+| `bog_get_interbank_fx_rates`           | Daily Interbank FX Rates                 | **live** |
+| `bog_get_treasury_bill_rates`          | Treasury Bill Rate                       | stub   |
+| `bog_get_central_bank_bill_rates`      | Bank of Ghana Bill Rates                 | stub   |
+| `bog_get_interbank_interest_rates`     | Interbank Interest Rates                 | stub   |
+| `bog_get_treasury_auction_results`     | Weekly GOG T-Bill Auction Results        | stub   |
+| `bog_get_central_bank_auction_results` | Weekly BOG Bill Auction Results          | stub   |
+| `bog_list_external_facilities`         | Project Administration & External Facilities | stub |
+
+Page URLs are in `BOG_PAGES` in `src/sources/bog/client.ts`; all seven returned
+HTTP 200 on 2026-07-25.
 
 Two naming decisions worth stating, since both pairs are easy to confuse and a
 model picking the wrong one would answer a different question:
@@ -52,18 +55,76 @@ The input contracts are final and can be coded against now:
 
 | Tool                                   | Input                                             |
 | -------------------------------------- | ------------------------------------------------- |
-| Rate series (bills, FX, interbank)     | `days` — calendar days back, default 90, max 1825 |
-| `bog_get_interbank_fx_rates`           | plus `currency` — ISO code, e.g. `USD`            |
+| `bog_get_interbank_fx_rates`           | `currency` only — **no date window**, see below   |
+| Bill rates, interbank interest rates   | `days` — calendar days back, default 90, max 1825 |
 | `bog_get_interbank_interest_rates`     | plus `frequency` — `daily` or `weekly`            |
 | Auction results                        | `limit` — most recent auctions, default 12        |
 | `bog_list_external_facilities`         | `refresh`                                         |
 
-### Outputs (deliberately undeclared)
+### Outputs
 
-None of these tools declares an `outputSchema` yet. The row shapes land with each
-implementation, once the real payload is in hand. Publishing a guessed schema would
-invite callers to code against fields that may not survive contact with the data —
-worse than publishing nothing.
+`bog_get_interbank_fx_rates` declares a full `outputSchema`. The six stubs declare
+none: their row shapes land with each implementation, once the real payload is in
+hand. Publishing a guessed schema would invite callers to code against fields that
+may not survive contact with the data — worse than publishing nothing.
+
+## The one implemented tool
+
+### `bog_get_interbank_fx_rates`
+
+Bank of Ghana interbank reference rates for the cedi, for the most recently
+published day. Nineteen currencies, each with bid, offer and mid.
+
+| Input      | Type   | Notes                                                          |
+| ---------- | ------ | -------------------------------------------------------------- |
+| `currency` | string | Code (`USD`) or published name (`US Dollar`). Omit for all 19.  |
+
+```json
+{
+  "date": "2026-07-24",
+  "currency": "US Dollar",
+  "code": "USD",
+  "pair": "USDGHS",
+  "bid": 11.6292,
+  "offer": 11.6408,
+  "mid": 11.635
+}
+```
+
+Rates are **cedis per unit of the foreign currency**, and these are the official
+interbank reference rates — not retail or forex-bureau rates, which are usually
+worse and differ by provider. Quote `mid` if only one number is wanted.
+
+Coverage goes beyond the majors: alongside USD, GBP, EUR, CHF, JPY and CNY it
+carries Naira, Leone, Dalasi, Ouguiya, and the BCEAO and ECOWAS units — which
+matter more than the majors for some questions and are easy to lose to a parser
+that assumes ISO majors only.
+
+**No date window.** See [FX is the exception](#fx-is-the-exception-latest-date-only).
+
+Cached for one hour under `bog:interbank-fx:v1`. One entry serves every currency
+query, because the upstream returns all 19 rows regardless of what is asked.
+
+#### Sample chat queries
+
+> **What's the cedi trading at against the dollar?**
+
+Returns `USD` with bid/offer/mid. A good answer quotes the mid and says it is the
+BoG interbank reference rate, not a rate anyone would get at a bureau.
+
+> **Show me all the Bank of Ghana interbank FX rates.**
+
+All 19 currencies for the latest published date.
+
+> **How has the cedi moved against the pound this month?**
+
+The honest answer is that this tool cannot say — BoG publishes only the latest day
+on this table. Worth keeping in the set precisely because it tests whether the
+model reports the limit instead of inventing a trend.
+
+> **What's the cedi worth in Naira?**
+
+Tests the non-major coverage: `NGN`-side rates are published under `Naira`.
 
 ## Blocker: BoG's TLS chain is incomplete
 
@@ -178,40 +239,70 @@ the differences decide how much work each one is.
 | BOG bill auctions        | Very likely a PDF per tender too                        | hard       |
 | External facilities      | No table and no PDF in the page — mechanism unknown     | unclear    |
 
-### The rate pages: plain HTML tables, not GSE-style wpDataTables
+### The rate pages are wpDataTables after all
 
-An earlier note in this file guessed that the GSE playbook — nonce, then
-`admin-ajax.php?action=get_wdtable` — would transfer. **It does not.** The
-treasury-bill page has no `wdtNonceFrontendEdit_<id>` input at all; the
-`wpDataTable` and `get_wdtable` strings in the markup are the plugin's site-wide
-JavaScript, not a server-side table we can query. There is no nonce to extract and
-no table id to POST.
+An earlier revision of this file concluded the GSE playbook did not transfer,
+because the pages have no `wdtNonceFrontendEdit_<id>` input. That was the wrong
+thing to look for. **bog.gov.gh exposes its nonce as
+`wdtNonceFrontendServerSide_<id>`**, and with that name every rate page turns out
+to be a server-side wpDataTable queryable exactly like GSE's:
 
-What the page does give, free with the HTML, is the current data:
+```
+GET  /treasury-and-the-markets/daily-interbank-fx-rates/   → wdtNonceFrontendServerSide_31
+POST /wp-admin/admin-ajax.php?action=get_wdtable&table_id=31
+```
 
-| Issue Date  | Tender | Security Type | Discount Rate | Interest Rate |
-| ----------- | ------ | ------------- | ------------- | ------------- |
-| 20 Jul 2026 | 2016   | 364 DAY BILL  | 11.5008       | 12.9954       |
-| 20 Jul 2026 | 2016   | 182 DAY BILL  | 7.3926        | 7.6763        |
-| 20 Jul 2026 | 2016   | 91 DAY BILL   | 5.7020        | 5.7845        |
-| 13 Jul 2026 | 2015   | 364 DAY BILL  | 11.4978       | 12.9915       |
+Looking for the wrong input name fails in the most misleading way available — it
+looks precisely like "there is no table here".
 
-Ten rows — roughly the last four weekly tenders across three tenors. BOG bill rates
-follow the same shape at shorter tenors (`14 DAY BILL`), and interbank interest
-rates come as `daily_interest_rate_ID` / `Effective Date` / `Rate (%)`.
+One genuine difference from GSE: **no cookie is required.** The POST succeeds on the
+nonce alone, verified by issuing it both with and without the `PHPSESSID` the page
+hands out. The cookie is still forwarded when offered, but is not treated as
+mandatory the way GSE's `__cf_bm` is.
 
-So a "latest rates" tool needs nothing more than this page. **Historical depth is
-the open question**, and it is exactly what a captured network request would answer:
-whatever the page does when you page back or filter by date.
+#### The tables, surveyed
 
-Two things that differ from GSE, for whoever writes the parser:
+Every table on every rate page was queried on 2026-07-25:
 
-- **Dates are `20 Jul 2026`**, not `20/07/2026`, so `parseDayFirstDate` from the GSE
-  parser does not apply. This needs its own month-name parser — strict, not
-  `Date.parse`, for the same reasons.
-- **Tenor is a string to interpret**: `364 DAY BILL`. Unlike GSE's stated-capital
-  column this is regular enough to parse safely, and `{ tenorDays: 364 }` is far
-  more useful for filtering than the raw label.
+| Page                     | Table | Series                   | Rows | Span        |
+| ------------------------ | ----- | ------------------------ | ---- | ----------- |
+| treasury-bill-rates      | 2     | GOG bills and bonds      | 1355 | 2013 → 2026 |
+| bank-of-ghana-bill-rates | 3     | BOG bills and bonds      | 585  | 2016 → 2026 |
+| daily-interbank-fx-rates | 31    | Per-currency bid/offer/mid | 19 | latest day only |
+| daily-interbank-fx-rates | 32    | Weighted-median summary  | 1    | one cell    |
+| interbank-interest-rates | 69    | Daily Interest Rates     | 1712 | 2019 → 2026 |
+| interbank-interest-rates | 70    | Weekly Interest Rates    | 362  | 2019 → 2026 |
+| interbank-interest-rates | 62    | Reverse Repo Rates       | 119  | 2002 → 2026 |
+| interbank-interest-rates | 63    | Depo Rates               | 119  | 2002 → 2026 |
+
+The four interbank series are not labelled in the markup or the table config; those
+names come from the page's own tab titles in document order. The reading is
+corroborated by the data — reverse repo at 15.00 sits above depo at 13.00, straddling
+the 14.00 policy rate — but it is inference, so treat it as strong rather than
+certain.
+
+So **history is available** for the bill rates and the interbank series: 1355 rows
+back to 2013 in one request. Those three datasets need no further discovery work.
+
+#### FX is the exception: latest date only
+
+Table 31 answers an *unfiltered* query with `recordsTotal: 144457,
+recordsFiltered: 19`. A filter that narrow with no search supplied means the table's
+own definition restricts it, and nothing in the request widens it — `length=-1`
+still returns 19, and date-range searches on the date column return zero rows.
+
+That is why `bog_get_interbank_fx_rates` takes no date window. Accepting a `days`
+parameter would promise history the source will not give. A live test asserts the
+restriction still holds, so if BoG ever lifts it, the tool can grow the input.
+
+#### Two parsing differences from GSE
+
+- **Dates are `24 Jul 2026`**, not `24/07/2026` — the page's own table config says
+  `dd M yy`. `parseBogDate` handles month names and deliberately rejects the slash
+  format rather than half-reading it.
+- **Tenor is a string to interpret**: `364 DAY BILL`. Regular enough to parse into
+  `{ tenorDays: 364 }` when the bill-rate tools land, unlike GSE's stated-capital
+  column.
 
 ### The auction results are PDFs
 

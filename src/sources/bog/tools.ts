@@ -1,23 +1,25 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import type { Cache } from "../../lib/cache.js";
+import { readThrough, type Cache } from "../../lib/cache.js";
 import { describeError } from "../../lib/errors.js";
 import { silentLogger, type Logger } from "../../lib/log.js";
-import { toolError } from "../../lib/results.js";
+import { ResultMetaSchema, toolError, toolResult, type DataOrigin } from "../../lib/results.js";
 import { BogClient } from "./client.js";
-import { DEFAULT_DAYS, MAX_DAYS } from "./types.js";
+import { parseInterbankFxPayload } from "./parser.js";
+import { DEFAULT_DAYS, InterbankFxRateSchema, MAX_DAYS } from "./types.js";
+
+/** FX is published once a day, so an hour of freshness is plenty. */
+const FX_CACHE_KEY = "bog:interbank-fx:v1";
+const FX_TTL_SECONDS = 60 * 60;
 
 /**
  * MCP tool surface for Bank of Ghana data, namespaced `bog_`.
  *
- * ## These are stubs
- *
- * Every tool here is registered with its final input schema and a description of
- * what it will return, but calling one returns an MCP error. That is deliberate:
- * it fixes the contract — names, inputs, which dataset belongs in which tool —
- * before the parsing work, and it means the registration, caching and docs
- * scaffolding is in place and tested for when each one is filled in.
+ * Interbank FX rates are implemented. The remaining six are registered stubs:
+ * final input schemas and descriptions, but calling one returns an error. That
+ * fixes the contract — names, inputs, which dataset belongs in which tool — before
+ * the parsing work, and keeps the registration and docs scaffolding tested.
  *
  * Two rules the stub errors follow, because this is financial data:
  *
@@ -27,8 +29,8 @@ import { DEFAULT_DAYS, MAX_DAYS } from "./types.js";
  *     instead. A plausible-looking T-bill rate recalled from training data is
  *     worse than no answer at all.
  *
- * Each description is prefixed NOT YET AVAILABLE so a model reading the tool list
- * can avoid calling it in the first place.
+ * Stub descriptions are prefixed NOT YET AVAILABLE so a model reading the tool
+ * list can avoid calling them in the first place.
  */
 
 export interface BogDeps {
@@ -91,22 +93,6 @@ const STUBS: readonly StubDefinition[] = [
     probe: (client) => client.fetchCentralBankBillRates(),
   },
   {
-    name: "bog_get_interbank_fx_rates",
-    title: "Ghana interbank FX rates",
-    description:
-      "Daily Bank of Ghana interbank reference rates for the Ghana cedi (GHS) against major " +
-      "currencies — US dollar, pound sterling, euro. These are the official reference rates, " +
-      "not retail or forex-bureau rates, which differ.",
-    inputSchema: {
-      ...daysInput("rate history"),
-      currency: z
-        .string()
-        .optional()
-        .describe("ISO 4217 code to filter to, e.g. USD, GBP, EUR. Omit for all currencies."),
-    },
-    probe: (client) => client.fetchInterbankFxRates(),
-  },
-  {
     name: "bog_get_interbank_interest_rates",
     title: "Ghana interbank interest rates",
     description:
@@ -158,6 +144,89 @@ const STUBS: readonly StubDefinition[] = [
 export function registerBogTools(server: McpServer, deps: BogDeps): void {
   const log = (deps.logger ?? silentLogger).child({ source: "bog" });
 
+  server.registerTool(
+    "bog_get_interbank_fx_rates",
+    {
+      title: "Ghana interbank FX rates",
+      description:
+        "Bank of Ghana interbank reference rates for the Ghana cedi against 19 currencies, " +
+        "with bid, offer and mid for each. These are the official interbank reference rates, " +
+        "not retail or forex-bureau rates, which are usually worse and differ by provider. " +
+        "Rates are cedis per unit of the foreign currency. " +
+        "Returns the LATEST published day only — BoG does not expose history on this table, so " +
+        "there is no date range to ask for.",
+      inputSchema: {
+        currency: z
+          .string()
+          .optional()
+          .describe(
+            "Restrict to one currency, by code (USD, GBP, EUR) or published name (\"US Dollar\"). " +
+              "Omit for all 19.",
+          ),
+      },
+      outputSchema: {
+        date: z.string().describe("Publication date of these rates, ISO 8601."),
+        rateCount: z.number(),
+        rates: z.array(InterbankFxRateSchema),
+        meta: ResultMetaSchema,
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ currency }) => {
+      log.info("tool: bog_get_interbank_fx_rates", { currency: currency ?? "all" });
+
+      try {
+        // Cached unfiltered, then filtered in memory: the upstream returns all 19
+        // rows regardless, so one cache entry serves every currency query.
+        const result = await readThrough(deps.cache, FX_CACHE_KEY, FX_TTL_SECONDS, async () =>
+          parseInterbankFxPayload(await deps.client.fetchInterbankFxRates()),
+        );
+
+        const { rows, skipped } = result.value;
+        const wanted = currency?.trim().toUpperCase();
+        const rates = wanted
+          ? rows.filter((row) => row.code === wanted || row.currency.toUpperCase() === wanted)
+          : rows;
+
+        log.info("tool: bog_get_interbank_fx_rates done", {
+          rates: rates.length,
+          skipped: skipped || undefined,
+          origin: result.origin,
+        });
+
+        const warnings: string[] = [];
+        if (result.origin === "stale-cache") {
+          warnings.push(
+            `bog.gov.gh could not be reached (${result.staleReason}); serving a cached copy from ${Math.round(result.ageSeconds / 60)} minutes ago.`,
+          );
+        }
+        if (skipped > 0) {
+          warnings.push(`${skipped} row(s) were dropped because required rate fields were missing.`);
+        }
+        if (currency && rates.length === 0) {
+          warnings.push(
+            `No interbank rate published for "${currency}". Call this tool without a currency to see all 19.`,
+          );
+        }
+
+        return toolResult({
+          date: rates[0]?.date ?? rows[0]?.date ?? "",
+          rateCount: rates.length,
+          rates,
+          meta: {
+            origin: result.origin as DataOrigin,
+            ageSeconds: result.ageSeconds,
+            skippedRows: skipped,
+            ...(warnings.length > 0 ? { warning: warnings.join(" ") } : {}),
+          },
+        });
+      } catch (error) {
+        log.error("tool: bog_get_interbank_fx_rates failed", { reason: describeError(error) });
+        return toolError(describeError(error));
+      }
+    },
+  );
+
   for (const stub of STUBS) {
     server.registerTool(
       stub.name,
@@ -192,5 +261,11 @@ export function registerBogTools(server: McpServer, deps: BogDeps): void {
   }
 }
 
-/** Tool names this source registers. Exported so tests and docs stay in step. */
-export const BOG_TOOL_NAMES: readonly string[] = STUBS.map((stub) => stub.name);
+/** Datasets still awaiting an implementation. */
+export const BOG_STUB_TOOL_NAMES: readonly string[] = STUBS.map((stub) => stub.name);
+
+/** Every tool this source registers. Exported so tests and docs stay in step. */
+export const BOG_TOOL_NAMES: readonly string[] = [
+  "bog_get_interbank_fx_rates",
+  ...BOG_STUB_TOOL_NAMES,
+];
