@@ -413,11 +413,20 @@ Every table on every rate page was queried on 2026-07-25:
 | interbank-interest-rates | 62    | Reverse Repo Rates       | 119  | 2002 → 2026 |
 | interbank-interest-rates | 63    | Depo Rates               | 119  | 2002 → 2026 |
 
-The four interbank series are not labelled in the markup or the table config; those
-names come from the page's own tab titles in document order. The reading is
-corroborated by the data — reverse repo at 15.00 sits above depo at 13.00, straddling
-the 14.00 policy rate — but it is inference, so treat it as strong rather than
-certain.
+The four interbank series carry no label in the table config, but the mapping is
+**confirmed, not inferred**. Each Jet-tabs panel declares a `data-tab` index matching
+its control, and each panel contains exactly one table, read from the live DOM on
+2026-07-25:
+
+| Panel | Tab label             | Table |
+| ----- | --------------------- | ----- |
+| 1     | Daily Interest Rates  | 69    |
+| 2     | Weekly Interest Rates | 70    |
+| 3     | Reverse Repo Rates    | 62    |
+| 4     | Depo Rates            | 63    |
+
+The data agrees: reverse repo at 15.00 sits above depo at 13.00, straddling the 14.00
+policy rate.
 
 So **history is available** for the bill rates and the interbank series: 1355 rows
 back to 2013 in one request. Those three datasets need no further discovery work.

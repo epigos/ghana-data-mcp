@@ -51,8 +51,11 @@ export const BOG_PAGES = {
  * wpDataTables table ids, grouped by the page that carries them. Surveyed
  * 2026-07-25 by reading the nonce inputs on each page and querying every table.
  *
- * The `interbankInterestRates` page carries four separate series; their labels
- * come from the page's own tab titles, in document order, not from guesswork.
+ * The `interbankInterestRates` page carries four separate series. Their labels are
+ * confirmed by DOM containment, not by document order: each Jet-tabs panel declares
+ * a `data-tab` index matching its control, and each panel holds exactly one table.
+ * Read in the browser on 2026-07-25 — panel 1 (Daily) holds 69, panel 2 (Weekly)
+ * holds 70, panel 3 (Reverse Repo) holds 62, panel 4 (Depo) holds 63.
  */
 export const BOG_TABLES = {
   /** treasury-bill-rates: 1355 rows back to 2013. Includes bonds, not just bills. */
