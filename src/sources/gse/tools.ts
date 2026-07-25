@@ -4,6 +4,7 @@ import { z } from "zod";
 import { readThrough, type Cache } from "../../lib/cache.js";
 import { describeError } from "../../lib/errors.js";
 import { silentLogger, type Logger } from "../../lib/log.js";
+import { ResultMetaSchema, toolError, toolResult, type DataOrigin } from "../../lib/results.js";
 import { historyTtlSeconds } from "../../lib/tradingHours.js";
 import { GseClient, sanitizeSymbol } from "./client.js";
 import {
@@ -28,10 +29,8 @@ import {
   MarketIndexRowSchema,
   MarketSchema,
   MAX_HISTORY_DAYS,
-  ResultMetaSchema,
   StockPriceRowSchema,
   type Company,
-  type DataOrigin,
 } from "./types.js";
 
 /** GFIM admissions change a few times a year at most. */
@@ -478,21 +477,3 @@ function mergeWarning(
   return { ...meta, warning: meta.warning ? `${meta.warning} ${extra}` : extra };
 }
 
-/**
- * MCP results carry both `structuredContent` (typed, validated against
- * outputSchema) and a text block, because not every client reads the former.
- */
-function toolResult(payload: Record<string, unknown>) {
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
-    structuredContent: payload,
-  };
-}
-
-/** Mirrors the reference implementation's ModelRetry: an error the model can act on. */
-function toolError(message: string) {
-  return {
-    content: [{ type: "text" as const, text: message }],
-    isError: true as const,
-  };
-}

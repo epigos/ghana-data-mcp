@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+// The shared result envelope (ResultMetaSchema, DataOrigin) lives in lib/results.ts,
+// since every source reports it.
+
 /**
  * One row of the GSE daily-price table, normalized.
  *
@@ -115,26 +118,6 @@ export const CompanyMatchSchema = CompanySchema.extend({
   score: z.number().describe("Match confidence from 0 to 1; 1 is an exact symbol match."),
 });
 export type CompanyMatch = z.infer<typeof CompanyMatchSchema>;
-
-/** Where a result came from, so a stale or seeded answer is never passed off as live. */
-export const DataOriginSchema = z.enum(["live", "cache", "stale-cache", "static-seed"]);
-export type DataOrigin = z.infer<typeof DataOriginSchema>;
-
-export const ResultMetaSchema = z.object({
-  origin: DataOriginSchema.describe(
-    "live = freshly scraped; cache = fresh cached copy; stale-cache = upstream failed, expired copy served; static-seed = built-in fallback list.",
-  ),
-  ageSeconds: z.number().describe("How long ago the data was fetched from gse.com.gh."),
-  warning: z
-    .string()
-    .optional()
-    .describe("Present when the data may be behind or incomplete. Pass this on to the user."),
-  skippedRows: z
-    .number()
-    .optional()
-    .describe("Rows dropped because required fields were missing or malformed."),
-});
-export type ResultMeta = z.infer<typeof ResultMetaSchema>;
 
 export const MAX_HISTORY_DAYS = 1825; // five years
 export const DEFAULT_HISTORY_DAYS = 90;

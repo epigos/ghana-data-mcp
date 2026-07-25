@@ -5,6 +5,8 @@ import type { Env } from "./env.js";
 import { createCache } from "./lib/cache.js";
 import { createLogger, debugEnabled } from "./lib/log.js";
 import { SERVER_NAME, SERVER_VERSION } from "./meta.js";
+import { BogClient } from "./sources/bog/client.js";
+import { registerBogTools } from "./sources/bog/tools.js";
 import { GseClient } from "./sources/gse/client.js";
 import { registerGseTools } from "./sources/gse/tools.js";
 
@@ -19,11 +21,13 @@ export function createServer(env: Env): McpServer {
     { name: SERVER_NAME, version: SERVER_VERSION },
     {
       instructions:
-        "Public Ghana data. Tools are namespaced by source: `gse_*` covers the Ghana Stock " +
-        "Exchange (company directory and daily price history). Share codes are required for " +
-        "price lookups — resolve a company name with gse_search_company first. Every result " +
-        "carries a `meta.origin` field; when it is `stale-cache` or `static-seed`, tell the " +
-        "user the data may be behind.",
+        "Public Ghana data. Tools are namespaced by source. `gse_*` covers the Ghana Stock " +
+        "Exchange: company directory, daily share prices, market index and fixed-income " +
+        "issuers. Share codes are required for price lookups — resolve a company name with " +
+        "gse_search_company first. `bog_*` covers Bank of Ghana treasury and market data and " +
+        "is NOT IMPLEMENTED YET: those tools return an error, and you must not fill the gap " +
+        "with remembered or estimated figures. Every result carries a `meta.origin` field; " +
+        "when it is `stale-cache` or `static-seed`, tell the user the data may be behind.",
     },
   );
 
@@ -52,6 +56,14 @@ export function createServer(env: Env): McpServer {
 
   registerGseTools(server, {
     client: new GseClient({ timeoutMs: 15_000, retries: 2, logger }),
+    cache,
+    logger,
+  });
+
+  // Registered stubs: the tools exist with their final inputs, but calling one
+  // returns an error until its fetch is implemented. See sources/bog/tools.ts.
+  registerBogTools(server, {
+    client: new BogClient({ timeoutMs: 15_000, retries: 2, logger }),
     cache,
     logger,
   });

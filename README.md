@@ -11,23 +11,30 @@ without restructuring anything — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Data sources
 
-| Source                              | Prefix | Tools | Covers                                                                                  |
-| ----------------------------------- | ------ | ----- | --------------------------------------------------------------------------------------- |
-| [Ghana Stock Exchange](docs/GSE.md) | `gse_` | 5     | Share prices, company directory, market index, fixed-income issuers                     |
+| Source                                | Prefix | Tools | Status | Covers                                                              |
+| ------------------------------------- | ------ | ----- | ------ | ------------------------------------------------------------------- |
+| [Ghana Stock Exchange](docs/GSE.md)   | `gse_` | 5     | live   | Share prices, company directory, market index, fixed-income issuers |
+| [Bank of Ghana](docs/BOG.md)          | `bog_` | 7     | stubs  | T-bill and BoG bill rates, interbank FX and interest rates, auction results, external facilities |
 
 Each source has its own guide with a full tool reference, sample chat queries, and
 the data caveats specific to it. **Start with [docs/GSE.md](docs/GSE.md).**
 
+The Bank of Ghana tools are **registered stubs**: the names and inputs are final,
+but calling one returns an error — no BoG data is served yet, and there is an
+unresolved [TLS problem on BoG's server](docs/BOG.md#blocker-bogs-tls-chain-is-incomplete)
+to settle first.
+
 ## Tools
 
-| Tool                                                                            | Returns                                                          |
-| ------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| [`gse_get_stock_history`](docs/GSE.md#gse_get_stock_history)                     | Daily prices and volume for one share code, oldest first         |
-| [`gse_list_companies`](docs/GSE.md#gse_list_companies)                           | Every listed company: share code, name, board, listing date      |
-| [`gse_search_company`](docs/GSE.md#gse_search_company)                           | Best-matching companies for a name, with a confidence score      |
-| [`gse_get_market_index`](docs/GSE.md#gse_get_market_index)                       | Market-wide daily GSE-CI, market cap, GSE-FSI and volume         |
-| [`gse_list_fixed_income_issuers`](docs/GSE.md#gse_list_fixed_income_issuers)     | Corporate bond issuers on the Ghana Fixed Income Market          |
-| `ping`                                                                          | Health check. No input; returns `{ ok, server, version }`        |
+| Tool                                                                         | Returns                                                       |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| [`gse_get_stock_history`](docs/GSE.md#gse_get_stock_history)                  | Daily prices and volume for one share code, oldest first      |
+| [`gse_list_companies`](docs/GSE.md#gse_list_companies)                        | Every listed company: share code, name, board, listing date   |
+| [`gse_search_company`](docs/GSE.md#gse_search_company)                        | Best-matching companies for a name, with a confidence score   |
+| [`gse_get_market_index`](docs/GSE.md#gse_get_market_index)                    | Market-wide daily GSE-CI, market cap, GSE-FSI and volume      |
+| [`gse_list_fixed_income_issuers`](docs/GSE.md#gse_list_fixed_income_issuers)  | Corporate bond issuers on the Ghana Fixed Income Market       |
+| [`bog_*` (7 tools)](docs/BOG.md#datasets-and-tools)                           | Bank of Ghana treasury data — **stubs, return an error**       |
+| `ping`                                                                       | Health check. No input; returns `{ ok, server, version }`      |
 
 `ping` is the only tool that belongs to no source — it touches nothing upstream,
 which is what makes it a clean connectivity check.
@@ -223,9 +230,10 @@ rejected POST.
 ## Testing
 
 ```bash
-npm test          # unit tests, no network
+npm test              # unit tests, no network
 npm run typecheck
-npm run test:live # optional: hits gse.com.gh to catch upstream markup changes
+npm run test:live     # optional: hits gse.com.gh to catch upstream markup changes
+npm run test:live:bog # opt-in: hits bog.gov.gh; currently fails, see docs/BOG.md
 ```
 
 The unit tests run against saved fixtures in `test/fixtures/`, so CI never depends
@@ -251,14 +259,19 @@ Neither workflow needs any secret.
 
 ## Status
 
-The GSE source is feature-complete: all six wpDataTables on gse.com.gh are read —
-price history, the company directory across all three boards, the market index,
-and GFIM fixed-income issuers — with fuzzy company search, caching, stale and seed
-fallbacks, rate limiting and logging.
+**Ghana Stock Exchange — feature-complete.** All six wpDataTables on gse.com.gh are
+read: price history, the company directory across all three boards, the market
+index, and GFIM fixed-income issuers — with fuzzy company search, caching, stale
+and seed fallbacks, rate limiting and logging.
 
-Further sources (Bank of Ghana FX rates, Ghana Statistical Service indicators) are
-what the namespacing exists for; see [CONTRIBUTING.md](CONTRIBUTING.md) for the
-walkthrough.
+**Bank of Ghana — stubs.** Seven tools registered with final inputs, all returning
+errors. The dataset URLs and the WordPress REST collections behind them are mapped
+and canary-tested; no parsing is written. Blocked on
+[an incomplete TLS chain on bog.gov.gh](docs/BOG.md#blocker-bogs-tls-chain-is-incomplete),
+which stops both Node and the Workers runtime from fetching it at all.
+
+Further sources — Ghana Statistical Service indicators, for instance — are what the
+namespacing exists for; see [CONTRIBUTING.md](CONTRIBUTING.md) for the walkthrough.
 
 ## License
 
