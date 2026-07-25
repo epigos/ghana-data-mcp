@@ -5,9 +5,12 @@ Treasury and money-market data published by the Bank of Ghana at
 
 > **Status: stubs.** Every tool below is registered with its final input schema,
 > but calling one returns an error. No Bank of Ghana data is available from this
-> server yet. There is also an unresolved blocker on BoG's side — see
-> [TLS blocker](#blocker-bogs-tls-chain-is-incomplete), which you should read
-> before starting implementation.
+> server yet.
+>
+> There is a certificate problem on BoG's server that stops the Workers runtime
+> fetching it at all — see [TLS blocker](#blocker-bogs-tls-chain-is-incomplete).
+> It has a safe local fix and does **not** block writing the parsers, but read it
+> before starting.
 
 - [Datasets and tools](#datasets-and-tools)
 - [Blocker: BoG's TLS chain is incomplete](#blocker-bogs-tls-chain-is-incomplete)
@@ -97,29 +100,66 @@ than broken.
 
 Plain HTTP is not an escape hatch: `http://www.bog.gov.gh/` resets the connection.
 
-### What to do about it
+### Not the answer: disabling certificate verification
 
-In rough order of preference:
+Worth stating plainly, because it is the first thing that comes to mind:
 
-1. **Ask BoG to fix it.** Serving the intermediate is a one-line web-server change
-   and fixes every strict client, not just this one.
-2. **Confirm production behaviour** by deploying a probe worker and fetching one
-   page. If Cloudflare's edge resolves the chain, the blocker only affects local
-   development and tests.
-3. **Fetch through something that completes the chain** — a small proxy, or a
-   Worker with a bundled CA. This adds a hop and a component to maintain.
+- **On Workers it is not even available.** The runtime's `fetch()` has no
+  equivalent of `rejectUnauthorized: false`. There is no flag to reach for.
+- **It would be the wrong trade anyway.** These are official financial reference
+  rates on a government host — precisely the case where a man-in-the-middle
+  matters. "Trust anything" is a much bigger hole than the one being patched.
 
-Disabling certificate verification is not on that list. These are official
-financial reference rates, and unverified TLS on a government host is exactly the
-case where a man-in-the-middle matters most.
+### Node and tests: fixed properly, today
 
-The live tests in `test/integration/bog.live.test.ts` are written and correct, but
-gated behind their own env var so the twice-weekly canary does not sit permanently
-red on a defect nobody here can fix:
+Node can be unblocked without weakening anything, by *supplying* the certificate
+BoG omits rather than by skipping the check. The leaf's own AIA extension names it:
 
 ```bash
-npm run test:live:bog
+curl -sO http://cacerts.digicert.com/DigiCertGlobalG2TLSRSASHA2562020CA1-1.crt
+openssl x509 -inform DER -in DigiCertGlobalG2TLSRSASHA2562020CA1-1.crt \
+  -out bog-intermediate.pem -outform PEM
 ```
+
+```bash
+NODE_EXTRA_CA_CERTS=$PWD/bog-intermediate.pem BOG_LIVE=1 npm run test:live:bog
+```
+
+Verified 2026-07-25: without it, `UNABLE_TO_VERIFY_LEAF_SIGNATURE`; with it, HTTP
+200 and all 13 live tests pass. Verification stays fully on — the intermediate is
+the genuine DigiCert one, itself signed by a root Node already trusts, so this
+completes the chain instead of ignoring it.
+
+### Workers: still open
+
+`NODE_EXTRA_CA_CERTS` has no counterpart in the Workers runtime, so this does not
+help the deployed path. Two things could:
+
+1. **Ask BoG to serve the intermediate.** A one-line web-server change that fixes
+   every strict client, not just this one. This is the real fix.
+2. **Check whether production already works.** Only the local `workerd` runtime was
+   tested. Cloudflare's edge may resolve the chain where local does not — one
+   deployed probe answers it:
+
+   ```js
+   export default { async fetch() {
+     try { const r = await fetch("https://www.bog.gov.gh/treasury-and-the-markets/treasury-bill-rates/");
+           return Response.json({ ok: r.ok, status: r.status }); }
+     catch (e) { return Response.json({ error: String(e.message) }); }
+   }};
+   ```
+
+Failing both, a proxy that completes the chain would work, at the cost of a hop and
+a component to maintain.
+
+### Meanwhile, this is not blocking
+
+The blocker only affects the *last mile* — a live fetch from Workers. Everything
+else can be built and tested now, because the architecture already separates them:
+`parser.ts` is pure and tested against saved fixtures, so payloads captured with
+`curl` (which works, since macOS completes the chain) are enough to write and verify
+the whole parsing layer. When the certificate is fixed, live fetching starts
+working and no parsing code changes.
 
 ## What the upstream looks like
 
@@ -144,7 +184,34 @@ the *discovery* half of the GSE approach, not the *parsing* half. And
 `exchange_rates` returned an empty array, so FX likely needs a different route.
 
 No REST collection obviously corresponds to the treasury-bill or BOG-bill **rate**
-series, so those may need the page itself.
+series — and it turns out they do not need one.
+
+### The rate pages are wpDataTables, like GSE
+
+Fetching `/treasury-and-the-markets/treasury-bill-rates/` on 2026-07-25 shows the
+current data already in the page HTML, in a `wpDataTable` — the same plugin
+gse.com.gh uses, with `admin-ajax` and a nonce present. So the GSE playbook applies:
+the first page comes free with the HTML, and the paginated history very likely comes
+from the same `admin-ajax.php?action=get_wdtable` POST.
+
+Columns, verbatim from the page:
+
+| Issue Date  | Tender | Security Type | Discount Rate | Interest Rate |
+| ----------- | ------ | ------------- | ------------- | ------------- |
+| 20 Jul 2026 | 2016   | 364 DAY BILL  | 11.5008       | 12.9954       |
+| 20 Jul 2026 | 2016   | 182 DAY BILL  | 7.3926        | 7.6763        |
+| 20 Jul 2026 | 2016   | 91 DAY BILL   | 5.7020        | 5.7845        |
+
+Two things to note before writing the parser:
+
+- **The date format differs from GSE.** BoG writes `20 Jul 2026`, not `20/07/2026`,
+  so `parseDayFirstDate` from the GSE parser does not apply. This needs its own
+  month-name parser — and it should be strict, not `Date.parse`, for the same
+  reason GSE's is.
+- **Tenor is a string to be interpreted**, not a number: `364 DAY BILL`. Whether to
+  expose it verbatim or as `{ tenorDays: 364 }` is a design call; a numeric field is
+  far more useful for filtering, and unlike GSE's stated-capital column this one is
+  regular enough to parse safely.
 
 ## Implementing a dataset
 
