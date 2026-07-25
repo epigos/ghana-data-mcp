@@ -107,7 +107,7 @@ export interface ParseFxOptions {
 }
 
 /**
- * Normalizes the interbank FX table into typed rows, sorted by currency pair.
+ * Normalizes the interbank FX table into typed rows, oldest first.
  *
  * All three prices are required: a row with a bid but no mid is not partially
  * useful for a caller quoting a rate, it is a row to leave out.
@@ -152,7 +152,14 @@ export function parseInterbankFxPayload(
     rows.push({ date, currency, code, pair, bid, offer, mid });
   }
 
-  rows.sort((a, b) => a.pair.localeCompare(b.pair));
+  // Date first, then pair. With a single-date snapshot this is just the pair sort,
+  // but a historical window arrives newest-first from upstream, and every other tool
+  // in this project returns oldest-first — so leaving it would have made `rates`
+  // silently disagree with the rest and put the newest row where callers look for
+  // the oldest.
+  rows.sort((a, b) =>
+    a.date === b.date ? a.pair.localeCompare(b.pair) : a.date < b.date ? -1 : 1,
+  );
   return { rows, skipped };
 }
 
@@ -187,6 +194,21 @@ export function parseTenorDays(securityType: string): number | null {
   if (!match) return null;
   const days = Number(match[1]);
   return Number.isFinite(days) && days > 0 ? days : null;
+}
+
+/**
+ * Resolves a loose currency input to the exact pair the upstream filter needs.
+ *
+ * `USD`, `usd` and `usdghs` all give `USDGHS`. A currency *name* ("US Dollar")
+ * cannot be resolved without the published list, so it returns null and the caller
+ * filters in memory instead.
+ */
+export function resolveCurrencyPair(currency: string): string | null {
+  const cleaned = currency.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!cleaned) return null;
+  if (cleaned.endsWith("GHS") && cleaned.length > 3) return cleaned;
+  // Codes on this table run 2-4 characters (WAU, XOF, USD, ZAR).
+  return /^[A-Z0-9]{2,4}$/.test(cleaned) ? `${cleaned}GHS` : null;
 }
 
 export interface ParsedBillRates {

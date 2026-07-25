@@ -16,6 +16,8 @@ import { errorResponse, htmlResponse, jsonResponse, stubFetch } from "../../help
 
 const fxPageHtml = fixture("bog-interbank-fx.trimmed.html");
 const fxPayload = fixtureJson("bog-interbank-fx.json");
+const fxHistoryPageHtml = fixture("bog-historical-fx.trimmed.html");
+const fxHistoryPayload = fixtureJson("bog-historical-fx-usd.json");
 const tbillPageHtml = fixture("bog-treasury-bill-rates.trimmed.html");
 const tbillPayload = fixtureJson("bog-treasury-bill-rates.json");
 const bogBillPageHtml = fixture("bog-central-bank-bill-rates.trimmed.html");
@@ -53,11 +55,18 @@ async function fxHarness(
   options: { tableResponses?: Array<() => Response>; cache?: Cache } = {},
 ) {
   const { fetch: fetchImpl, calls } = stubFetch([
+    // The historical page must match before the daily one: both contain
+    // "interbank-fx-rates".
+    {
+      match: "/historical-interbank-fx-rates/",
+      responses: [() => htmlResponse(fxHistoryPageHtml, [])],
+    },
     { match: "/daily-interbank-fx-rates/", responses: [() => htmlResponse(fxPageHtml, [])] },
     {
       match: "table_id=31",
       responses: options.tableResponses ?? [() => jsonResponse(fxPayload)],
     },
+    { match: "table_id=40", responses: [() => jsonResponse(fxHistoryPayload)] },
   ]);
 
   const server = new McpServer({ name: "test", version: "0.0.0" });
@@ -110,10 +119,13 @@ describe("BoG tool registration", () => {
       "bog_get_treasury_bill_rates",
       "bog_list_external_facilities",
     ]);
-    // One tool per dataset this source covers. The two weekly auction-result
-    // datasets are excluded on purpose — BoG publishes them only as PDFs.
-    expect(names).toHaveLength(Object.keys(BOG_PAGES).length);
+    // Not one tool per page: the FX tool spans two (the latest-day snapshot and the
+    // historical series), and the two weekly auction-result datasets are excluded on
+    // purpose because BoG publishes them only as PDFs.
+    expect(names).toHaveLength(5);
     expect(names.some((name) => name.includes("auction"))).toBe(false);
+    // Every page the client knows about should still be reachable by some tool.
+    expect(Object.keys(BOG_PAGES)).toContain("historicalInterbankFxRates");
   });
 
   it("namespaces every tool, so it cannot collide with another source", async () => {
@@ -269,7 +281,7 @@ describe("BoG stub inputs", () => {
 interface FxPayload {
   date: string;
   rateCount: number;
-  rates: Array<{ currency: string; code: string; pair: string; bid: number; offer: number; mid: number }>;
+  rates: Array<{ date: string; currency: string; code: string; pair: string; bid: number; offer: number; mid: number }>;
   meta: { origin: string; warning?: string };
 }
 
@@ -515,5 +527,140 @@ describe("bog_get_central_bank_bill_rates", () => {
 
     expect(treasury.rowCount).not.toBe(central.rowCount);
     expect(central.meta.origin).toBe("live");
+  });
+});
+
+describe("bog_get_interbank_fx_rates history", () => {
+  // Table 31 is pinned to the latest publication; table 40 holds the series. The
+  // presence of `days` is what chooses between them.
+  it("uses the snapshot table when no window is given", async () => {
+    const { client, calls } = await fxHarness();
+    await call(client, "bog_get_interbank_fx_rates");
+
+    expect(calls[0]?.url).toContain("/daily-interbank-fx-rates/");
+    expect(calls[1]?.url).toContain("table_id=31");
+  });
+
+  it("uses the historical table when a window is given", async () => {
+    const { client, calls } = await fxHarness();
+    const result = await call(client, "bog_get_interbank_fx_rates", { days: 30, currency: "USD" });
+
+    expect(result.isError).toBeFalsy();
+    expect(calls[0]?.url).toContain("/historical-interbank-fx-rates/");
+    expect(calls[1]?.url).toContain("table_id=40");
+  });
+
+  it("returns a dated series, oldest first", async () => {
+    const { client } = await fxHarness();
+    const payload = (await call(client, "bog_get_interbank_fx_rates", { days: 30, currency: "USD" }))
+      .structuredContent as unknown as FxPayload;
+
+    expect(payload.rateCount).toBe(17);
+    const dates = payload.rates.map((rate) => rate.date);
+    expect(new Set(dates).size).toBeGreaterThan(1);
+    // Oldest first, like every other series tool here.
+    expect(dates).toEqual([...dates].sort());
+    // `date` reports the NEWEST row, which is the last one.
+    expect(payload.date).toBe([...dates].sort().at(-1));
+    expect(payload.date).toBe("2026-07-24");
+  });
+
+  it("sends a BoG-formatted date range and an exact pair upstream", async () => {
+    const { client, calls } = await fxHarness();
+    await call(client, "bog_get_interbank_fx_rates", { days: 30, currency: "usd" });
+
+    const form = Object.fromEntries(new URLSearchParams(calls[1]?.body ?? ""));
+    expect(form["columns[0][search][value]"]).toMatch(
+      /^\d{2} [A-Z][a-z]{2} \d{4}\|\d{2} [A-Z][a-z]{2} \d{4}$/,
+    );
+    // Resolved from "usd" — the upstream filter matches whole values only, so the
+    // bare code would silently return nothing.
+    expect(form["columns[2][search][value]"]).toBe("USDGHS");
+  });
+
+  // A currency *name* cannot be resolved to a pair without the published list, so
+  // the window comes back unfiltered and is narrowed here instead.
+  it("does not push an unresolvable currency name upstream", async () => {
+    const { client, calls } = await fxHarness();
+    await call(client, "bog_get_interbank_fx_rates", { days: 30, currency: "US Dollar" });
+
+    const form = Object.fromEntries(new URLSearchParams(calls[1]?.body ?? ""));
+    expect(form["columns[2][search][value]"]).toBe("");
+  });
+
+  it("caches history separately per window and pair", async () => {
+    const { client, calls } = await fxHarness();
+
+    await call(client, "bog_get_interbank_fx_rates", { days: 30, currency: "USD" });
+    const afterFirst = calls.length;
+
+    // Same window and pair: cached.
+    await call(client, "bog_get_interbank_fx_rates", { days: 30, currency: "USD" });
+    expect(calls.length).toBe(afterFirst);
+
+    // Different window: fetched.
+    await call(client, "bog_get_interbank_fx_rates", { days: 60, currency: "USD" });
+    expect(calls.length).toBeGreaterThan(afterFirst);
+  });
+
+  it("does not let a history result serve a snapshot query", async () => {
+    const { client } = await fxHarness();
+
+    const history = (await call(client, "bog_get_interbank_fx_rates", { days: 30, currency: "USD" }))
+      .structuredContent as unknown as FxPayload;
+    const snapshot = (await call(client, "bog_get_interbank_fx_rates"))
+      .structuredContent as unknown as FxPayload;
+
+    expect(history.rateCount).toBe(17);
+    expect(snapshot.rateCount).toBe(19);
+  });
+
+  it("rejects a window beyond the supported range", async () => {
+    const { client } = await fxHarness();
+    expect(
+      (await call(client, "bog_get_interbank_fx_rates", { days: 99_999 })).isError,
+    ).toBe(true);
+  });
+});
+
+describe("cedi redenomination", () => {
+  // A 20-year window mixes old and new cedis: USD/GHS reads ~9166 in 2006 and ~11.6
+  // today. Unflagged, that looks like a currency collapse rather than a
+  // redenomination, so the tool detects it instead of trusting the reader to know.
+  it("warns when the window crosses 1 July 2007", async () => {
+    const oldRow = ["31 Jul 2006", "US Dollar", "USDGHS", "9166.00", "9166.36", "9166.18"];
+    const newRow = ["24 Jul 2026", "US Dollar", "USDGHS", "11.6292", "11.6408", "11.6350"];
+
+    const { fetch: fetchImpl } = stubFetch([
+      {
+        match: "/historical-interbank-fx-rates/",
+        responses: [() => htmlResponse(fxHistoryPageHtml, [])],
+      },
+      { match: "table_id=40", responses: [() => jsonResponse({ data: [newRow, oldRow] })] },
+    ]);
+
+    const server = new McpServer({ name: "test", version: "0.0.0" });
+    registerBogTools(server, {
+      client: new BogClient({ fetchImpl, baseDelayMs: 0, retries: 0 }),
+      cache: createCache(createMemoryKV()),
+    });
+    const client = new Client({ name: "test-client", version: "0.0.0" });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await Promise.all([client.connect(ct), server.connect(st)]);
+
+    const payload = (await call(client, "bog_get_interbank_fx_rates", { days: 7300, currency: "USD" }))
+      .structuredContent as unknown as FxPayload;
+
+    expect(payload.rateCount).toBe(2);
+    expect(payload.meta.warning).toMatch(/OLD cedis/);
+    expect(payload.meta.warning).toMatch(/2007-07-01/);
+  });
+
+  it("does not warn for a window entirely after the redenomination", async () => {
+    const { client } = await fxHarness();
+    const payload = (await call(client, "bog_get_interbank_fx_rates", { days: 30, currency: "USD" }))
+      .structuredContent as unknown as FxPayload;
+
+    expect(payload.meta.warning ?? "").not.toMatch(/OLD cedis/);
   });
 });

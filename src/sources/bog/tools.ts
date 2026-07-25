@@ -1,13 +1,24 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { readThrough, type Cache } from "../../lib/cache.js";
+import { readThrough, type Cache, type ReadThroughResult } from "../../lib/cache.js";
 import { describeError } from "../../lib/errors.js";
 import { silentLogger, type Logger } from "../../lib/log.js";
 import { ResultMetaSchema, toolError, toolResult, type DataOrigin } from "../../lib/results.js";
 import { BogClient } from "./client.js";
-import { parseBillRatePayload, parseInterbankFxPayload } from "./parser.js";
-import { BillRateSchema, DEFAULT_DAYS, InterbankFxRateSchema, MAX_DAYS } from "./types.js";
+import {
+  parseBillRatePayload,
+  parseInterbankFxPayload,
+  resolveCurrencyPair,
+  type ParsedFxRates,
+} from "./parser.js";
+import {
+  BillRateSchema,
+  CEDI_REDENOMINATION_DATE,
+  DEFAULT_DAYS,
+  InterbankFxRateSchema,
+  MAX_DAYS,
+} from "./types.js";
 
 /** FX is published once a day, so an hour of freshness is plenty. */
 const FX_CACHE_KEY = "bog:interbank-fx:v1";
@@ -15,6 +26,19 @@ const FX_TTL_SECONDS = 60 * 60;
 
 /** Bill rates are set at weekly tenders, so a day of freshness is generous. */
 const BILL_RATE_TTL_SECONDS = 12 * 60 * 60;
+
+/** A past window never changes, so it can be held far longer than the snapshot. */
+const FX_HISTORY_TTL_SECONDS = 12 * 60 * 60;
+
+/**
+ * Upper bound on rows fetched for one historical FX window.
+ *
+ * The unfiltered table is 144,457 rows (~4,700 a year across 19 currencies) and a
+ * Worker on the free tier gets 10ms of CPU, so an unbounded parse is a real risk
+ * rather than a theoretical one. Truncation is reported in `meta.warning` instead of
+ * being hidden.
+ */
+const FX_HISTORY_MAX_ROWS = 20_000;
 
 /**
  * MCP tool surface for Bank of Ghana data, namespaced `bog_`.
@@ -107,34 +131,56 @@ export function registerBogTools(server: McpServer, deps: BogDeps): void {
         "with bid, offer and mid for each. These are the official interbank reference rates, " +
         "not retail or forex-bureau rates, which are usually worse and differ by provider. " +
         "Rates are cedis per unit of the foreign currency. " +
-        "Returns the LATEST published day only — BoG does not expose history on this table, so " +
-        "there is no date range to ask for.",
+        "Without `days` this returns the latest published day. With `days` it returns the " +
+        "historical series, which BoG publishes back to January 1996 — pass a `currency` too " +
+        "for long windows, since the full table is very large. Rates before 1 July 2007 are in " +
+        "OLD cedis and are about 10,000 times larger, because Ghana redenominated and BoG does " +
+        "not adjust the series; never compare or chart across that date without saying so.",
       inputSchema: {
         currency: z
           .string()
           .optional()
           .describe(
             "Restrict to one currency, by code (USD, GBP, EUR) or published name (\"US Dollar\"). " +
-              "Omit for all 19.",
+              "Omit for all 19. Strongly recommended together with `days`.",
+          ),
+        days: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_DAYS)
+          .optional()
+          .describe(
+            "Calendar days of history to return, ending today. Omit for just the latest " +
+              "published day. Data goes back to January 1996.",
           ),
       },
       outputSchema: {
-        date: z.string().describe("Publication date of these rates, ISO 8601."),
+        date: z
+          .string()
+          .describe("Most recent publication date in the result, ISO 8601. Each row carries its own."),
         rateCount: z.number(),
         rates: z.array(InterbankFxRateSchema),
         meta: ResultMetaSchema,
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async ({ currency }) => {
-      log.info("tool: bog_get_interbank_fx_rates", { currency: currency ?? "all" });
+    async ({ currency, days }) => {
+      log.info("tool: bog_get_interbank_fx_rates", {
+        currency: currency ?? "all",
+        days: days ?? "latest",
+      });
 
       try {
-        // Cached unfiltered, then filtered in memory: the upstream returns all 19
-        // rows regardless, so one cache entry serves every currency query.
-        const result = await readThrough(deps.cache, FX_CACHE_KEY, FX_TTL_SECONDS, async () =>
-          parseInterbankFxPayload(await deps.client.fetchInterbankFxRates()),
-        );
+        // Two different tables. Without a window, table 31 gives the latest
+        // publication directly, which is robust across weekends and holidays in a
+        // way "the last day or two of history" would not be. With a window, table 40
+        // holds the whole series.
+        const result = days
+          ? await loadFxHistory(deps, { days, currency })
+          : await readThrough(deps.cache, FX_CACHE_KEY, FX_TTL_SECONDS, async () =>
+              parseInterbankFxPayload(await deps.client.fetchInterbankFxRates()),
+            );
 
         const { rows, skipped } = result.value;
         const wanted = currency?.trim().toUpperCase();
@@ -157,14 +203,27 @@ export function registerBogTools(server: McpServer, deps: BogDeps): void {
         if (skipped > 0) {
           warnings.push(`${skipped} row(s) were dropped because required rate fields were missing.`);
         }
+        if (rates.length >= FX_HISTORY_MAX_ROWS) {
+          warnings.push(
+            `Results were capped at ${FX_HISTORY_MAX_ROWS} rows, so the oldest part of the window is missing. Narrow the window or pass a currency.`,
+          );
+        }
         if (currency && rates.length === 0) {
           warnings.push(
             `No interbank rate published for "${currency}". Call this tool without a currency to see all 19.`,
           );
         }
+        // Detected rather than left to the reader: a window reaching past the
+        // redenomination mixes two units in one series, and the jump looks like a
+        // currency collapse instead of an arithmetic change.
+        if (rates.some((rate) => rate.date < CEDI_REDENOMINATION_DATE)) {
+          warnings.push(
+            `This window crosses Ghana's redenomination on ${CEDI_REDENOMINATION_DATE}: rates before that date are in OLD cedis (10,000 old = 1 new), so they are ~10,000x larger and are NOT comparable with later rates. Do not chart or compute a change across that boundary without converting.`,
+          );
+        }
 
         return toolResult({
-          date: rates[0]?.date ?? rows[0]?.date ?? "",
+          date: rates.at(-1)?.date ?? rows.at(-1)?.date ?? "",
           rateCount: rates.length,
           rates,
           meta: {
@@ -331,6 +390,32 @@ export function registerBogTools(server: McpServer, deps: BogDeps): void {
       },
     );
   }
+}
+
+/**
+ * Historical FX window, filtered upstream by pair where possible.
+ *
+ * The upstream pair filter matches whole values exactly, so a code resolves to
+ * `USDGHS` and is pushed upstream; a currency *name* cannot be resolved without the
+ * published list, so those windows come back unfiltered and are narrowed in memory.
+ * The cache key records which happened, so the two never collide.
+ */
+async function loadFxHistory(
+  deps: BogDeps,
+  options: { days: number; currency?: string },
+): Promise<ReadThroughResult<ParsedFxRates>> {
+  const pair = options.currency ? resolveCurrencyPair(options.currency) : null;
+  const key = `bog:interbank-fx-history:v1:${options.days}:${pair ?? "all"}`;
+
+  return readThrough<ParsedFxRates>(deps.cache, key, FX_HISTORY_TTL_SECONDS, async () =>
+    parseInterbankFxPayload(
+      await deps.client.fetchHistoricalInterbankFxRates({
+        days: options.days,
+        ...(pair ? { pair } : {}),
+        maxRows: FX_HISTORY_MAX_ROWS,
+      }),
+    ),
+  );
 }
 
 /** Datasets still awaiting an implementation. */

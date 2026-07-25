@@ -5,6 +5,7 @@ import { BOG_BASE_URL, BOG_PAGES, BogClient } from "../../src/sources/bog/client
 import {
   parseBillRatePayload,
   parseInterbankFxPayload,
+  resolveCurrencyPair,
 } from "../../src/sources/bog/parser.js";
 
 /**
@@ -75,6 +76,45 @@ describe.skipIf(!live)("bog.gov.gh (live)", () => {
     expect(Number(payload.recordsTotal)).toBeGreaterThan(Number(payload.recordsFiltered));
     expect(new Set(payload.data.map((row) => row[0])).size).toBe(1);
   }, 60_000);
+
+  it("still returns a parseable historical FX series, oldest first", async () => {
+    const client = new BogClient({ timeoutMs: 30_000, retries: 1 });
+    const pair = resolveCurrencyPair("USD");
+    expect(pair).toBe("USDGHS");
+
+    const { rows, skipped } = parseInterbankFxPayload(
+      await client.fetchHistoricalInterbankFxRates({ days: 365, pair: pair! }),
+    );
+
+    expect(skipped).toBe(0);
+    expect(rows.length).toBeGreaterThan(100);
+
+    const dates = rows.map((row) => row.date);
+    expect(dates).toEqual([...dates].sort());
+    expect(new Set(rows.map((row) => row.code))).toEqual(new Set(["USD"]));
+  }, 60_000);
+
+  // The 19x payload reduction this buys is what makes long windows viable inside a
+  // Worker's CPU budget, so it is worth pinning that the exact-value filter still
+  // behaves as an exact-value filter.
+  it("still narrows the historical table to one pair upstream", async () => {
+    const client = new BogClient({ timeoutMs: 30_000, retries: 1 });
+
+    const filtered = (await client.fetchHistoricalInterbankFxRates({
+      days: 30,
+      pair: "USDGHS",
+    })) as { recordsFiltered?: unknown };
+    const unfiltered = (await client.fetchHistoricalInterbankFxRates({ days: 30 })) as {
+      recordsFiltered?: unknown;
+    };
+
+    expect(Number(filtered.recordsFiltered)).toBeGreaterThan(0);
+    // 19 currencies, so the unfiltered window should be roughly an order of
+    // magnitude larger.
+    expect(Number(unfiltered.recordsFiltered)).toBeGreaterThan(
+      Number(filtered.recordsFiltered) * 5,
+    );
+  }, 90_000);
 
   it("still returns parseable Treasury bill rates for a date window", async () => {
     const client = new BogClient({ timeoutMs: 30_000, retries: 1 });

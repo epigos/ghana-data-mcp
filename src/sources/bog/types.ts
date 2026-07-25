@@ -20,11 +20,23 @@ export const MAX_DAYS = 7300;
 export const DEFAULT_DAYS = 90;
 
 /**
+ * The day Ghana redenominated: 1 July 2007, when the cedi (GHC) was replaced by the
+ * new cedi (GHS) at 10,000 to 1.
+ *
+ * BoG's historical series runs straight through it without adjustment, so rates
+ * before this date are quoted in old cedis and are ~10,000x larger. On 2026-07-25 a
+ * 20-year USD window returned 9166.18 for 2006-07-31 and 11.635 for the latest day.
+ */
+export const CEDI_REDENOMINATION_DATE = "2007-07-01";
+
+/**
  * One interbank reference rate for the cedi against another currency.
  *
  * These are the Bank of Ghana's official interbank reference rates, quoted as
  * cedi per unit of the foreign currency. They are not retail or forex-bureau
  * rates, which are usually worse and differ between providers.
+ *
+ * Rates before 1 July 2007 are in **old cedis** — see CEDI_REDENOMINATION_DATE.
  */
 export const InterbankFxRateSchema = z.object({
   date: z.string().describe("Publication date, ISO 8601 (YYYY-MM-DD)."),

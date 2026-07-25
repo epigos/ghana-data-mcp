@@ -7,12 +7,14 @@ import {
   parseInterbankFxPayload,
   parseNumber,
   parseTenorDays,
+  resolveCurrencyPair,
 } from "../../../src/sources/bog/parser.js";
 import { fixtureJson } from "../../helpers/fixtures.js";
 
 const fxPayload = fixtureJson<{ data: string[][] }>("bog-interbank-fx.json");
 const tbillPayload = fixtureJson<{ data: string[][] }>("bog-treasury-bill-rates.json");
 const bogBillPayload = fixtureJson<{ data: string[][] }>("bog-central-bank-bill-rates.json");
+const historyPayload = fixtureJson<{ data: string[][] }>("bog-historical-fx-usd.json");
 
 describe("parseBogDate", () => {
   // BoG writes month names (`dd M yy` per its own table config), where GSE writes
@@ -93,9 +95,21 @@ describe("parseInterbankFxPayload", () => {
     expect(codes.every((code) => !code.endsWith("GHS"))).toBe(true);
   });
 
-  it("sorts by currency pair for a stable order", () => {
+  it("sorts by currency pair within a single date", () => {
     const pairs = parseInterbankFxPayload(fxPayload).rows.map((row) => row.pair);
     expect(pairs).toEqual([...pairs].sort());
+  });
+
+  // Upstream returns a historical window newest-first. Every other tool here is
+  // oldest-first, and the tool reports `date` from the last row, so getting this
+  // backwards would have put the oldest date in a field documented as the newest.
+  it("sorts a multi-date window oldest first", () => {
+    const { rows } = parseInterbankFxPayload(historyPayload);
+    const dates = rows.map((row) => row.date);
+
+    expect(new Set(dates).size).toBeGreaterThan(1);
+    expect(dates).toEqual([...dates].sort());
+    expect(rows.at(-1)?.date).toBe([...dates].sort().at(-1));
   });
 
   it("covers the west-African currencies BoG publishes alongside the majors", () => {
@@ -276,5 +290,32 @@ describe("parseBillRatePayload", () => {
 
   it("throws ParseError when the response is not a table payload", () => {
     expect(() => parseBillRatePayload({ rates: [] })).toThrow(ParseError);
+  });
+});
+
+describe("resolveCurrencyPair", () => {
+  // The upstream pair filter matches whole values exactly, so a bare code has to
+  // become USDGHS before it is sent or it silently matches nothing.
+  it("turns a code into the pair the upstream filter needs", () => {
+    expect(resolveCurrencyPair("USD")).toBe("USDGHS");
+    expect(resolveCurrencyPair("usd")).toBe("USDGHS");
+    expect(resolveCurrencyPair(" gbp ")).toBe("GBPGHS");
+  });
+
+  it("passes a full pair through", () => {
+    expect(resolveCurrencyPair("USDGHS")).toBe("USDGHS");
+    expect(resolveCurrencyPair("usdghs")).toBe("USDGHS");
+  });
+
+  it("handles the short west-African codes on this table", () => {
+    expect(resolveCurrencyPair("WAU")).toBe("WAUGHS");
+  });
+
+  // A name cannot be mapped to a pair without the published list, so the caller
+  // filters in memory rather than sending something that matches nothing.
+  it("returns null for a currency name", () => {
+    expect(resolveCurrencyPair("US Dollar")).toBeNull();
+    expect(resolveCurrencyPair("Pound Sterling")).toBeNull();
+    expect(resolveCurrencyPair("")).toBeNull();
   });
 });

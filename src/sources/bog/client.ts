@@ -42,6 +42,7 @@ export const BOG_PAGES = {
   treasuryBillRates: "/treasury-and-the-markets/treasury-bill-rates/",
   centralBankBillRates: "/treasury-and-the-markets/bank-of-ghana-bill-rates/",
   interbankFxRates: "/treasury-and-the-markets/daily-interbank-fx-rates/",
+  historicalInterbankFxRates: "/treasury-and-the-markets/historical-interbank-fx-rates/",
   interbankInterestRates: "/treasury-and-the-markets/interbank-interest-rates/",
   externalFacilities: "/treasury-and-the-markets/project-administration-and-external-facilities/",
 } as const;
@@ -62,6 +63,11 @@ export const BOG_TABLES = {
   interbankFxRates: 31,
   /** daily-interbank-fx-rates: a one-cell "weighted median" summary widget. */
   interbankFxSummary: 32,
+  /**
+   * historical-interbank-fx-rates: the full series — 144,457 rows back to
+   * 02 Jan 1996, same six columns as table 31, and it *does* accept a date range.
+   */
+  historicalInterbankFxRates: 40,
   /** interbank-interest-rates, tab "Daily Interest Rates". */
   dailyInterestRates: 69,
   /** interbank-interest-rates, tab "Weekly Interest Rates". */
@@ -297,6 +303,61 @@ export class BogClient {
       columnSearches: { 0: { value: range, regex: false } },
       // Three securities per weekly tender, so a generous bound on the window.
       length: Math.min(5000, Math.max(100, boundedDays * 3)),
+      orderColumn: 0,
+      orderDir: "desc",
+      orderable: true,
+    });
+  }
+
+  /**
+   * Historical interbank FX rates from table 40, windowed by date.
+   *
+   * A different page and table from the latest-day snapshot: table 31 is pinned to
+   * the most recent publication, while this one holds the whole series and takes a
+   * real date-range search.
+   *
+   * `pair` filters upstream when given, and matters more here than it looks. The
+   * unfiltered table is 144,457 rows — about 4,700 per year across 19 currencies —
+   * and a Worker on the free tier has a 10ms CPU budget, so parsing a multi-year
+   * unfiltered window is not something to do casually. One exact pair cuts the
+   * payload 19-fold.
+   *
+   * Like the security-type column on the bill tables, this search matches the whole
+   * value exactly: `USDGHS` returns rows, `USD` returns none, and `regex: true`
+   * does not change that. So the caller-facing tool resolves a loose input to an
+   * exact pair before it gets here, and falls back to filtering in memory when it
+   * cannot.
+   */
+  async fetchHistoricalInterbankFxRates(params: {
+    days: number;
+    pair?: string;
+    maxRows?: number;
+    now?: Date;
+  }): Promise<unknown> {
+    const { days, pair, maxRows = 20_000, now } = params;
+    const boundedDays = Math.min(Math.max(Math.round(days), 1), MAX_DAYS);
+    const range = bogDateRange(boundedDays, now);
+
+    this.logger.info("bog: fetching historical FX rates", {
+      days: boundedDays,
+      range,
+      pair: pair ?? "all",
+    });
+
+    const session = await this.createSession(BOG_PAGES.historicalInterbankFxRates, [
+      BOG_TABLES.historicalInterbankFxRates,
+    ]);
+
+    const columnSearches: Record<number, ColumnSearch> = { 0: { value: range, regex: false } };
+    if (pair) columnSearches[2] = { value: pair, regex: false };
+
+    return this.fetchTable({
+      tableId: BOG_TABLES.historicalInterbankFxRates,
+      session,
+      pagePath: BOG_PAGES.historicalInterbankFxRates,
+      columnNames: FX_COLUMN_NAMES,
+      columnSearches,
+      length: maxRows,
       orderColumn: 0,
       orderDir: "desc",
       orderable: true,

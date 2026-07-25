@@ -79,9 +79,10 @@ may not survive contact with the data — worse than publishing nothing.
 Bank of Ghana interbank reference rates for the cedi, for the most recently
 published day. Nineteen currencies, each with bid, offer and mid.
 
-| Input      | Type   | Notes                                                          |
-| ---------- | ------ | -------------------------------------------------------------- |
-| `currency` | string | Code (`USD`) or published name (`US Dollar`). Omit for all 19.  |
+| Input      | Type   | Notes                                                                     |
+| ---------- | ------ | ------------------------------------------------------------------------- |
+| `currency` | string | Code (`USD`) or published name (`US Dollar`). Omit for all 19.             |
+| `days`     | number | Calendar days of history. Omit for just the latest published day. Max 7300. |
 
 ```json
 {
@@ -104,10 +105,40 @@ carries Naira, Leone, Dalasi, Ouguiya, and the BCEAO and ECOWAS units — which
 matter more than the majors for some questions and are easy to lose to a parser
 that assumes ISO majors only.
 
-**No date window.** See [FX is the exception](#fx-is-the-exception-latest-date-only).
+**History comes from a different table.** Without `days`, the tool reads table 31,
+which BoG pins to the latest publication — the robust way to answer "what is the rate
+today" across weekends and holidays. With `days`, it reads table 40 on the
+`historical-interbank-fx-rates` page, which holds the whole series: 144,457 rows back
+to **02 Jan 1996**, and does accept a date range.
 
-Cached for one hour under `bog:interbank-fx:v1`. One entry serves every currency
-query, because the upstream returns all 19 rows regardless of what is asked.
+Rows come back **oldest first**, and `date` reports the newest row in the result.
+
+**Pass a `currency` with long windows.** The unfiltered table is about 4,700 rows a
+year across 19 currencies, and a Worker on the free tier has a 10ms CPU budget. A
+currency filter is pushed upstream and cuts the payload 19-fold. It only works for
+codes — `USD` becomes `USDGHS` — because that search matches whole values exactly, the
+same trap as the bill tables. A currency *name* cannot be resolved to a pair, so those
+windows are fetched whole and narrowed in memory. Results are capped at 20,000 rows and
+`meta.warning` says so if the cap bites.
+
+### ⚠️ The series crosses Ghana's 2007 redenomination
+
+On **1 July 2007** the cedi was redenominated: 10,000 old cedis (GHC) became 1 new
+cedi (GHS). **BoG's historical series runs straight through it without adjusting**, so
+a long window mixes two units:
+
+| Date       | USD mid  | Unit       |
+| ---------- | -------- | ---------- |
+| 2006-07-31 | 9166.18  | old cedis  |
+| 2026-07-24 | 11.635   | new cedis  |
+
+Unflagged, that reads as a currency collapse rather than an arithmetic change. The tool
+detects any window reaching before that date and says so in `meta.warning`; a good
+answer never charts or computes a change across the boundary without converting.
+
+Caching: the latest-day snapshot is held one hour under `bog:interbank-fx:v1`, and each
+historical window is held 12 hours under
+`bog:interbank-fx-history:v1:{days}:{pair|all}` — a past window does not change.
 
 #### Sample chat queries
 
@@ -122,9 +153,19 @@ All 19 currencies for the latest published date.
 
 > **How has the cedi moved against the pound this month?**
 
-The honest answer is that this tool cannot say — BoG publishes only the latest day
-on this table. Worth keeping in the set precisely because it tests whether the
-model reports the limit instead of inventing a trend.
+`currency: "GBP", days: 30`. About 21 rows, oldest first.
+
+> **Chart USD/GHS over the last ten years.**
+
+`currency: "USD", days: 3650` — 2,475 rows, from 3.9463 in July 2016 to 11.635 in
+July 2026. A useful reminder that the answer should quote the window, not just the
+endpoints.
+
+> **What has the cedi done against the dollar over the last twenty years?**
+
+The one to watch. `days: 7300` reaches 2006, before the redenomination, so the series
+opens at 9166.18 and the tool attaches a `meta.warning`. A correct answer explains the
+10,000-to-1 change instead of reporting a collapse.
 
 > **What's the cedi worth in Naira?**
 
@@ -366,6 +407,7 @@ Every table on every rate page was queried on 2026-07-25:
 | bank-of-ghana-bill-rates | 3     | BOG bills and bonds      | 585  | 2016 → 2026 |
 | daily-interbank-fx-rates | 31    | Per-currency bid/offer/mid | 19 | latest day only |
 | daily-interbank-fx-rates | 32    | Weighted-median summary  | 1    | one cell    |
+| historical-interbank-fx-rates | 40 | Per-currency bid/offer/mid | 144457 | 1996 → 2026 |
 | interbank-interest-rates | 69    | Daily Interest Rates     | 1712 | 2019 → 2026 |
 | interbank-interest-rates | 70    | Weekly Interest Rates    | 362  | 2019 → 2026 |
 | interbank-interest-rates | 62    | Reverse Repo Rates       | 119  | 2002 → 2026 |
@@ -380,16 +422,21 @@ certain.
 So **history is available** for the bill rates and the interbank series: 1355 rows
 back to 2013 in one request. Those three datasets need no further discovery work.
 
-#### FX is the exception: latest date only
+#### The FX snapshot table is latest-date-only — but there is a second table
 
 Table 31 answers an *unfiltered* query with `recordsTotal: 144457,
 recordsFiltered: 19`. A filter that narrow with no search supplied means the table's
-own definition restricts it, and nothing in the request widens it — `length=-1`
-still returns 19, and date-range searches on the date column return zero rows.
+own definition restricts it to the latest date; `length=-1` still returns 19, and
+date-range searches on its date column return zero rows.
 
-That is why `bog_get_interbank_fx_rates` takes no date window. Accepting a `days`
-parameter would promise history the source will not give. A live test asserts the
-restriction still holds, so if BoG ever lifts it, the tool can grow the input.
+An earlier revision of this file concluded from that BoG publishes no FX history. It
+does — on a **different page**, `/treasury-and-the-markets/historical-interbank-fx-rates/`,
+as **table 40**. Same six columns, the full 144,457 rows back to 02 Jan 1996, and a
+working date-range filter. The `recordsTotal` was the clue: table 31 could see all
+144,457 rows and was choosing to return 19 of them.
+
+Both are used, for different questions — see
+[`bog_get_interbank_fx_rates`](#bog_get_interbank_fx_rates).
 
 #### Two parsing differences from GSE
 

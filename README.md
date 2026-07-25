@@ -14,7 +14,7 @@ without restructuring anything — see [CONTRIBUTING.md](CONTRIBUTING.md).
 | Source                                | Prefix | Tools | Status | Covers                                                              |
 | ------------------------------------- | ------ | ----- | ------ | ------------------------------------------------------------------- |
 | [Ghana Stock Exchange](docs/GSE.md)   | `gse_` | 5     | live   | Share prices, company directory, market index, fixed-income issuers |
-| [Bank of Ghana](docs/BOG.md)          | `bog_` | 5     | 3 live, 2 stubs | Interbank FX rates, Treasury and BoG bill rates (live); interbank interest rates, external facilities (stubs) |
+| [Bank of Ghana](docs/BOG.md)          | `bog_` | 5     | 3 live, 2 stubs | Interbank FX rates incl. history to 1996, Treasury and BoG bill rates (live); interbank interest rates, external facilities (stubs) |
 
 Each source has its own guide with a full tool reference, sample chat queries, and
 the data caveats specific to it. **Start with [docs/GSE.md](docs/GSE.md).**
@@ -36,7 +36,7 @@ which stops the Workers runtime reaching bog.gov.gh at all.
 | [`gse_search_company`](docs/GSE.md#gse_search_company)                        | Best-matching companies for a name, with a confidence score   |
 | [`gse_get_market_index`](docs/GSE.md#gse_get_market_index)                    | Market-wide daily GSE-CI, market cap, GSE-FSI and volume      |
 | [`gse_list_fixed_income_issuers`](docs/GSE.md#gse_list_fixed_income_issuers)  | Corporate bond issuers on the Ghana Fixed Income Market       |
-| [`bog_get_interbank_fx_rates`](docs/BOG.md#bog_get_interbank_fx_rates)        | Cedi interbank reference rates vs 19 currencies, latest day    |
+| [`bog_get_interbank_fx_rates`](docs/BOG.md#bog_get_interbank_fx_rates)        | Cedi interbank reference rates vs 19 currencies, latest or back to 1996 |
 | [`bog_get_treasury_bill_rates`](docs/BOG.md#bog_get_treasury_bill_rates-and-bog_get_central_bank_bill_rates) | GoG bill, note and bond rates by tender, back to 2013 |
 | [`bog_get_central_bank_bill_rates`](docs/BOG.md#bog_get_treasury_bill_rates-and-bog_get_central_bank_bill_rates) | Bank of Ghana's own bill rates, back to 2016 |
 | [`bog_*` (2 more)](docs/BOG.md#datasets-and-tools)                            | Interbank interest rates, external facilities — **stubs**      |
