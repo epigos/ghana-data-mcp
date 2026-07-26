@@ -1,0 +1,89 @@
+{
+  "regions": {
+    "AFQ": {
+      "label": "Africa (Region)"
+    },
+    "AFRREO": {
+      "label": "African Regional Economic Outlook"
+    },
+    "APQ": {
+      "label": "Asia and Pacific"
+    },
+    "AZQ": {
+      "label": "Australia and New Zealand"
+    },
+    "CAQ": {
+      "label": "Central Asia and the Caucasus"
+    },
+    "CBQ": {
+      "label": "Caribbean"
+    },
+    "CMQ": {
+      "label": "Central America"
+    },
+    "EAQ": {
+      "label": "East Asia"
+    },
+    "EEQ": {
+      "label": "Eastern Europe "
+    },
+    "EUQ": {
+      "label": "Europe"
+    },
+    "MEQ": {
+      "label": "Middle East (Region)"
+    },
+    "NAQ": {
+      "label": "North Africa"
+    },
+    "NMQ": {
+      "label": "North America"
+    },
+    "PIQ": {
+      "label": "Pacific Islands "
+    },
+    "SAQ": {
+      "label": "South Asia"
+    },
+    "SEQ": {
+      "label": "Southeast Asia"
+    },
+    "SMQ": {
+      "label": "South America"
+    },
+    "SSQ": {
+      "label": "Sub-Saharan Africa (Region) "
+    },
+    "WEQ": {
+      "label": "Western Europe"
+    },
+    "WHQ": {
+      "label": "Western Hemisphere (Region)"
+    },
+    "AFR_SSQ": {
+      "label": "Sub-Saharan Africa (Region) "
+    },
+    "SPR_GD_MECA": {
+      "label": "Middle East and Central Asia"
+    },
+    "SPR_GD_EUR": {
+      "label": "Europe"
+    },
+    "SPR_GD_AFR": {
+      "label": "Africa"
+    },
+    "SPR_GD_CPI": {
+      "label": "Caribbean and Pacific Islands"
+    },
+    "SPR_GD_WHD": {
+      "label": "Western Hemisphere"
+    },
+    "SPR_GD_Asia": {
+      "label": "Asia"
+    }
+  },
+  "api": {
+    "version": "2",
+    "output-method": "json"
+  }
+}

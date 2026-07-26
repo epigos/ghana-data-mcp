@@ -36,7 +36,7 @@ Eleven tools, all read-only, namespaced by source.
 | Tool | Returns |
 | ---- | ------- |
 | [`imf_list_indicators`](docs/IMF.md#imf_list_indicators) | Search ~130 macroeconomic indicators by keyword; returns the code each needs |
-| [`imf_get_indicator_history`](docs/IMF.md#imf_get_indicator_history) | Ghana's time series for one or more indicators — GDP, inflation, debt, and more |
+| [`imf_get_indicator_history`](docs/IMF.md#imf_get_indicator_history) | Time series for one or more indicators — GDP, inflation, debt, and more — for Ghana and, optionally, other countries, regions or groups |
 
 Plus `ping` — no input, returns `{ ok, server, version }`. It belongs to no source and
 touches nothing upstream, which makes it a clean connectivity check.

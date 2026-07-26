@@ -6,13 +6,15 @@ import { describeError } from "../../lib/errors.js";
 import { silentLogger, type Logger } from "../../lib/log.js";
 import { ResultMetaSchema, toolError, toolResult, type DataOrigin } from "../../lib/results.js";
 import { ImfClient } from "./client.js";
-import { parseIndicatorsPayload, parseSeriesPayload } from "./parser.js";
+import { parseEntitiesPayload, parseIndicatorsPayload, parseSeriesPayload } from "./parser.js";
 import {
   IndicatorMetaSchema,
   IndicatorSeriesSchema,
+  MAX_COUNTRIES_PER_CALL,
   MAX_INDICATORS_PER_CALL,
   MAX_YEAR,
   MIN_YEAR,
+  type EntityMeta,
 } from "./types.js";
 
 /**
@@ -22,7 +24,8 @@ import {
  * (`imf_get_indicator_history`). Both go through the same cached indicator
  * catalog, since the history tool needs it anyway to validate the ids a caller
  * asks for — see below on why that validation has to happen here rather than
- * upstream.
+ * upstream. The history tool also draws on a second, similarly cached catalog of
+ * countries, regions and analytical groups, for the same reason.
  */
 
 export interface ImfDeps {
@@ -35,11 +38,18 @@ const INDICATORS_CACHE_KEY = "imf:indicators:v1";
 /** The catalog changes a few times a year at most. */
 const INDICATORS_TTL_SECONDS = 7 * 24 * 60 * 60;
 
+const ENTITIES_CACHE_KEY = "imf:entities:v1";
+/** Country, region and group lists change even less often than indicators. */
+const ENTITIES_TTL_SECONDS = 7 * 24 * 60 * 60;
+
 /** A past request never changes, so the whole series is cached, not per-window. */
 const SERIES_TTL_SECONDS = 24 * 60 * 60;
 
 const DEFAULT_LIST_LIMIT = 25;
 const MAX_LIST_LIMIT = 100;
+
+/** Ghana's own data if a caller names no `countries` at all. */
+const DEFAULT_COUNTRIES = ["GHA"];
 
 export function registerImfTools(server: McpServer, deps: ImfDeps): void {
   const log = (deps.logger ?? silentLogger).child({ source: "imf" });
@@ -75,9 +85,11 @@ export function registerImfTools(server: McpServer, deps: ImfDeps): void {
       log.info("tool: imf_list_indicators", { query: query ?? "(none)" });
 
       try {
-        const { catalog, meta } = await loadCatalog(deps);
+        const { catalog, meta } = await loadIndicatorCatalog(deps);
         const all = Object.values(catalog);
-        const ranked = query ? rankByQuery(all, query) : all.slice().sort((a, b) => a.id.localeCompare(b.id));
+        const ranked = query
+          ? rankByQuery(all, query, scoreIndicator, (i) => i.label)
+          : all.slice().sort((a, b) => a.id.localeCompare(b.id));
         const indicators = ranked.slice(0, limit ?? DEFAULT_LIST_LIMIT);
 
         const warning = query && indicators.length === 0 ? `No indicator matched "${query}".` : undefined;
@@ -97,15 +109,18 @@ export function registerImfTools(server: McpServer, deps: ImfDeps): void {
   server.registerTool(
     "imf_get_indicator_history",
     {
-      title: "Ghana macroeconomic indicator history",
+      title: "IMF macroeconomic indicator history",
       description:
-        "Time series for one or more IMF indicators, for Ghana, oldest first. Use " +
-        "imf_list_indicators first if you don't already know the indicator code — codes like " +
-        "NGDP_RPCH are not guessable from the name. Most indicators include IMF's OWN forward " +
-        "projections alongside historical actuals; each row's `isProjection` says which — " +
-        "always tell the user when a figure quoted is a projection rather than an outturn. " +
-        "Coverage varies a lot: some indicators run 1980-2031, some only cover a handful of " +
-        "recent years, and not every indicator has Ghana data at all.",
+        "Time series for one or more IMF indicators, for Ghana and — optionally — other " +
+        "countries, regions or analytical groups, oldest first. Use imf_list_indicators first " +
+        "if you don't already know the indicator code — codes like NGDP_RPCH are not guessable " +
+        "from the name. Most indicators include IMF's OWN forward projections alongside " +
+        "historical actuals; each row's `isProjection` says which — always tell the user when a " +
+        "figure quoted is a projection rather than an outturn. Coverage varies a lot: some " +
+        "indicators run 1980-2031, some cover only a handful of recent years, and not every " +
+        "indicator has data for every country. Region/group aggregates (e.g. Sub-Saharan " +
+        "Africa, ECOWAS) exist for some indicators and not others — this is not something to " +
+        "guess at, check `rowCount`.",
       inputSchema: {
         indicators: z
           .array(z.string().min(1))
@@ -114,6 +129,17 @@ export function registerImfTools(server: McpServer, deps: ImfDeps): void {
           .describe(
             `One to ${MAX_INDICATORS_PER_CALL} indicator codes, e.g. ["NGDP_RPCH", "PCPIPCH"]. ` +
               "Case-insensitive.",
+          ),
+        countries: z
+          .array(z.string().min(1))
+          .min(1)
+          .max(MAX_COUNTRIES_PER_CALL)
+          .optional()
+          .describe(
+            `Which countries, regions or groups to compare — up to ${MAX_COUNTRIES_PER_CALL}. ` +
+              "Accepts an IMF code (\"NGA\"), a plain country name (\"Nigeria\"), or a " +
+              "region/group name (\"Sub-Saharan Africa\", \"ECOWAS\"). Case-insensitive. Omit " +
+              "for Ghana alone.",
           ),
         startYear: z.number().int().min(MIN_YEAR).max(MAX_YEAR).optional().describe("Omit for earliest available."),
         endYear: z.number().int().min(MIN_YEAR).max(MAX_YEAR).optional().describe("Omit for latest available, including projections."),
@@ -124,9 +150,10 @@ export function registerImfTools(server: McpServer, deps: ImfDeps): void {
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async ({ indicators, startYear, endYear }) => {
+    async ({ indicators, countries, startYear, endYear }) => {
       log.info("tool: imf_get_indicator_history", {
         indicators: indicators.join(","),
+        countries: (countries ?? DEFAULT_COUNTRIES).join(","),
         startYear: startYear ?? "(earliest)",
         endYear: endYear ?? "(latest)",
       });
@@ -136,30 +163,42 @@ export function registerImfTools(server: McpServer, deps: ImfDeps): void {
       }
 
       try {
-        const { catalog } = await loadCatalog(deps);
-        const resolved: string[] = [];
-        const unresolved: string[] = [];
+        const [{ catalog: indicatorCatalog }, { catalog: entityCatalog }] = await Promise.all([
+          loadIndicatorCatalog(deps),
+          loadEntityCatalog(deps),
+        ]);
 
-        for (const requested of indicators) {
-          const canonical = resolveIndicatorId(catalog, requested);
-          if (canonical) resolved.push(canonical);
-          else unresolved.push(requested);
-        }
-
-        if (resolved.length === 0) {
+        const { resolved: resolvedIndicators, unresolved: unresolvedIndicators } = resolveAll(
+          indicators,
+          (requested) => resolveIndicatorId(indicatorCatalog, requested),
+        );
+        if (resolvedIndicators.length === 0) {
           return toolError(
-            `None of these are recognized IMF indicator codes: ${unresolved.join(", ")}. ` +
+            `None of these are recognized IMF indicator codes: ${unresolvedIndicators.join(", ")}. ` +
               "Call imf_list_indicators to find the right code.",
           );
         }
 
-        // Dedupe and sort so the same set of indicators always hits the same cache
-        // entry regardless of the order or repetition a caller happened to use.
-        const ids = [...new Set(resolved)].sort();
-        const key = `imf:series:v1:${ids.join(",")}`;
+        const requestedCountries = countries ?? DEFAULT_COUNTRIES;
+        const { resolved: resolvedEntities, unresolved: unresolvedCountries } = resolveAll(
+          requestedCountries,
+          (requested) => resolveEntityId(entityCatalog, requested),
+        );
+        if (resolvedEntities.length === 0) {
+          return toolError(
+            `None of these are recognized countries, regions or groups: ${unresolvedCountries.join(", ")}. ` +
+              "Try an IMF code (e.g. \"NGA\") or the plain country name.",
+          );
+        }
+
+        // Dedupe and sort both dimensions so the same request always hits the same
+        // cache entry regardless of the order or repetition a caller happened to use.
+        const indicatorIds = [...new Set(resolvedIndicators)].sort();
+        const entities = dedupeEntitiesById(resolvedEntities).sort((a, b) => a.id.localeCompare(b.id));
+        const key = `imf:series:v1:${indicatorIds.join(",")}:${entities.map((e) => e.id).join(",")}`;
 
         const result = await readThrough(deps.cache, key, SERIES_TTL_SECONDS, async () =>
-          parseSeriesPayload(await deps.client.fetchSeries(ids), ids),
+          parseSeriesPayload(await deps.client.fetchSeries(indicatorIds), indicatorIds, entities),
         );
 
         const { series: fullSeries, skipped } = result.value;
@@ -174,7 +213,8 @@ export function registerImfTools(server: McpServer, deps: ImfDeps): void {
         for (const s of series) s.rowCount = s.rows.length;
 
         log.info("tool: imf_get_indicator_history done", {
-          indicators: ids.join(","),
+          indicators: indicatorIds.join(","),
+          countries: entities.map((e) => e.id).join(","),
           rows: series.reduce((sum, s) => sum + s.rowCount, 0),
           skipped: skipped || undefined,
           origin: result.origin,
@@ -186,14 +226,19 @@ export function registerImfTools(server: McpServer, deps: ImfDeps): void {
             `The IMF DataMapper API could not be reached (${result.staleReason}); serving a cached copy from ${Math.round(result.ageSeconds / 3600)} hour(s) ago.`,
           );
         }
-        if (unresolved.length > 0) {
+        if (unresolvedIndicators.length > 0) {
           warnings.push(
-            `These were not recognized and were skipped: ${unresolved.join(", ")}. Call imf_list_indicators to find the right code.`,
+            `These indicator codes were not recognized and were skipped: ${unresolvedIndicators.join(", ")}. Call imf_list_indicators to find the right code.`,
+          );
+        }
+        if (unresolvedCountries.length > 0) {
+          warnings.push(
+            `These countries/regions/groups were not recognized and were skipped: ${unresolvedCountries.join(", ")}.`,
           );
         }
         for (const s of series) {
           if (s.rowCount === 0) {
-            warnings.push(`${s.id} has no published data for Ghana.`);
+            warnings.push(`${s.indicatorId} has no published data for ${s.entityLabel}.`);
           }
         }
 
@@ -214,8 +259,8 @@ export function registerImfTools(server: McpServer, deps: ImfDeps): void {
   );
 }
 
-/** Shared catalog loader: both tools need it, one cached fetch serves both. */
-async function loadCatalog(
+/** Shared indicator-catalog loader: both tools need it, one cached fetch serves both. */
+async function loadIndicatorCatalog(
   deps: ImfDeps,
 ): Promise<{ catalog: Record<string, z.infer<typeof IndicatorMetaSchema>>; meta: z.infer<typeof ResultMetaSchema> }> {
   const result = await readThrough(deps.cache, INDICATORS_CACHE_KEY, INDICATORS_TTL_SECONDS, async () => {
@@ -235,6 +280,36 @@ async function loadCatalog(
   };
 }
 
+/**
+ * Merges the countries, regions and groups catalogs into one lookup, tagging each
+ * entry with which kind it is. Cached and fetched as a single unit — three catalogs
+ * that together change a handful of times a year don't need three separate cache
+ * entries and TTLs.
+ *
+ * Merge order is groups, then regions, then countries, so that in the unlikely
+ * event an id were ever reused across catalogs, the country reading wins — that is
+ * overwhelmingly the more common intent behind a bare code like "NGA". No such
+ * collision has been observed in practice.
+ */
+async function loadEntityCatalog(
+  deps: ImfDeps,
+): Promise<{ catalog: Record<string, EntityMeta> }> {
+  const result = await readThrough(deps.cache, ENTITIES_CACHE_KEY, ENTITIES_TTL_SECONDS, async () => {
+    const [groups, regions, countries] = await Promise.all([
+      deps.client.fetchEntities("group"),
+      deps.client.fetchEntities("region"),
+      deps.client.fetchEntities("country"),
+    ]);
+    return {
+      ...parseEntitiesPayload(groups, "group"),
+      ...parseEntitiesPayload(regions, "region"),
+      ...parseEntitiesPayload(countries, "country"),
+    };
+  });
+
+  return { catalog: result.value };
+}
+
 /** Resolves a caller-supplied id case-insensitively; the API itself is case-sensitive. */
 function resolveIndicatorId(
   catalog: Record<string, z.infer<typeof IndicatorMetaSchema>>,
@@ -246,24 +321,85 @@ function resolveIndicatorId(
 }
 
 /**
- * Ranks indicators for a keyword query. The catalog is small (~130 entries) and
+ * Resolves a caller-supplied country/region/group to its canonical entity.
+ *
+ * An exact code match (case-insensitive) always wins outright — a caller who
+ * already knows "NGA" should never have that overridden by a coincidental label
+ * match. Failing that, the best-scoring label match is used, which is what lets a
+ * model just write "Nigeria" or "Sub-Saharan Africa" without knowing IMF's codes at
+ * all. On a genuine tie the first-found candidate wins silently; a caller who needs
+ * to disambiguate should use the precise code instead.
+ */
+function resolveEntityId(
+  catalog: Record<string, EntityMeta>,
+  requested: string,
+): EntityMeta | undefined {
+  const trimmed = requested.trim();
+  if (!trimmed) return undefined;
+
+  const exactByCode = catalog[trimmed] ?? Object.values(catalog).find(
+    (entity) => entity.id.toLowerCase() === trimmed.toLowerCase(),
+  );
+  if (exactByCode) return exactByCode;
+
+  const wanted = trimmed.toLowerCase();
+  let best: EntityMeta | undefined;
+  let bestScore = 0;
+  for (const entity of Object.values(catalog)) {
+    const score = scoreEntity(entity, wanted);
+    if (score > bestScore) {
+      bestScore = score;
+      best = entity;
+    }
+  }
+  return best;
+}
+
+/** Runs `resolve` over every requested string, splitting hits from misses. */
+function resolveAll<T>(
+  requested: readonly string[],
+  resolve: (value: string) => T | undefined,
+): { resolved: T[]; unresolved: string[] } {
+  const resolved: T[] = [];
+  const unresolved: string[] = [];
+
+  for (const value of requested) {
+    const hit = resolve(value);
+    if (hit !== undefined) resolved.push(hit);
+    else unresolved.push(value);
+  }
+
+  return { resolved, unresolved };
+}
+
+function dedupeEntitiesById(entities: readonly EntityMeta[]): EntityMeta[] {
+  const byId = new Map(entities.map((entity) => [entity.id, entity]));
+  return [...byId.values()];
+}
+
+/**
+ * Ranks catalog entries for a keyword query. Both catalogs here are small
+ * (~130 indicators, ~400 entities across countries/regions/groups combined) and
  * mostly distinguished by plain-English labels, so a simple tiered substring match
  * — not GSE's fuzzy scoring, built for genuine name ambiguity across 40 companies —
- * is the right amount of machinery here.
+ * is the right amount of machinery for either. Ties are broken alphabetically by
+ * label so the result order is deterministic rather than an accident of whatever
+ * order the catalog happened to arrive in.
  */
-function rankByQuery(
-  indicators: readonly z.infer<typeof IndicatorMetaSchema>[],
+function rankByQuery<T>(
+  items: readonly T[],
   query: string,
-): z.infer<typeof IndicatorMetaSchema>[] {
+  score: (item: T, query: string) => number,
+  labelOf: (item: T) => string,
+): T[] {
   const wanted = query.trim().toLowerCase();
   if (!wanted) return [];
 
-  const scored = indicators
-    .map((indicator) => ({ indicator, score: scoreIndicator(indicator, wanted) }))
+  return items
+    .map((item) => ({ item, score: score(item, wanted) }))
     .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score || a.indicator.label.localeCompare(b.indicator.label));
-
-  return scored.map((entry) => entry.indicator);
+    .sort((a, b) => b.score - a.score || labelOf(a.item).localeCompare(labelOf(b.item)))
+    .map((entry) => entry.item);
 }
 
 function scoreIndicator(indicator: z.infer<typeof IndicatorMetaSchema>, query: string): number {
@@ -277,6 +413,18 @@ function scoreIndicator(indicator: z.infer<typeof IndicatorMetaSchema>, query: s
   if (label.includes(query)) return 0.6;
   if (indicator.dataset.toLowerCase() === query) return 0.5;
   if (indicator.description.toLowerCase().includes(query)) return 0.3;
+  return 0;
+}
+
+function scoreEntity(entity: EntityMeta, query: string): number {
+  const id = entity.id.toLowerCase();
+  const label = entity.label.toLowerCase();
+
+  if (id === query) return 1;
+  if (label === query) return 0.95;
+  if (label.split(/\W+/).includes(query)) return 0.85;
+  if (label.startsWith(query)) return 0.8;
+  if (label.includes(query)) return 0.6;
   return 0;
 }
 

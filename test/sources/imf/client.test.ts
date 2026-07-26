@@ -7,6 +7,9 @@ import { errorResponse, jsonResponse, stubFetch } from "../../helpers/stubFetch.
 
 const indicatorsPayload = fixtureJson("imf-indicators.json");
 const seriesPayload = fixtureJson("imf-series-headline.json");
+const countriesPayload = fixtureJson("imf-countries.json");
+const regionsPayload = fixtureJson("imf-regions.json");
+const groupsPayload = fixtureJson("imf-groups.json");
 
 const fast = { baseDelayMs: 0 };
 
@@ -53,6 +56,24 @@ describe("ImfClient.fetchIndicators", () => {
 
     await expect(client(fetchImpl).fetchIndicators()).resolves.toEqual(indicatorsPayload);
     expect(calls).toHaveLength(2);
+  });
+});
+
+describe("ImfClient.fetchEntities", () => {
+  it.each([
+    ["country", "countries", countriesPayload],
+    ["region", "regions", regionsPayload],
+    ["group", "groups", groupsPayload],
+  ] as const)("fetches the %s catalog from /%s, no query string", async (kind, path, payload) => {
+    const { fetch: fetchImpl, calls } = stubFetch([
+      { match: `/api/v2/${path}`, responses: [() => jsonResponse(payload)] },
+    ]);
+
+    const result = await client(fetchImpl).fetchEntities(kind);
+
+    expect(result).toEqual(payload);
+    expect(calls[0]?.url).toContain(`/api/v2/${path}`);
+    expect(calls[0]?.url).not.toContain("?");
   });
 });
 

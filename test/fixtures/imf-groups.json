@@ -1,0 +1,395 @@
+{
+  "groups": {
+    "ADVEC": {
+      "label": "Advanced economies"
+    },
+    "AEEUEJ": {
+      "label": "Adv econ excl US, Euro, Japan"
+    },
+    "AFR": {
+      "label": "Africa (Analytical)"
+    },
+    "AS5": {
+      "label": "ASEAN-5"
+    },
+    "CEE": {
+      "label": "Central and Eastern Europe"
+    },
+    "CEMAC": {
+      "label": "CEMAC"
+    },
+    "CFAFZ": {
+      "label": "CFA Franc Zone "
+    },
+    "CISM": {
+      "label": "Commonwealth of Independent States and Mongolia"
+    },
+    "COMESA": {
+      "label": "COMESA (SSA members)"
+    },
+    "DA": {
+      "label": "Emerging and Developing Asia"
+    },
+    "EAC": {
+      "label": "East African Community "
+    },
+    "EAC-5": {
+      "label": "East African Community "
+    },
+    "EEF": {
+      "label": "Export earnings: fuel"
+    },
+    "EENF": {
+      "label": "Export earnings: nonfuel"
+    },
+    "EU": {
+      "label": "European Union"
+    },
+    "EUR": {
+      "label": "Europe"
+    },
+    "EURO": {
+      "label": "Euro area"
+    },
+    "EUROAREA": {
+      "label": "Euro area"
+    },
+    "FLERRC": {
+      "label": "Countries without conventional exchange rate pegs"
+    },
+    "FRC": {
+      "label": "Countries in fragile and conflict-affected situations"
+    },
+    "FXERRC": {
+      "label": "Countries with conventional exchange rate pegs"
+    },
+    "LIC": {
+      "label": "Low-income countries"
+    },
+    "LL": {
+      "label": "Landlocked"
+    },
+    "MAE": {
+      "label": "Major advanced economies (G7)"
+    },
+    "MAF": {
+      "label": "Emerging Asia excl Japan incl NIEs"
+    },
+    "MCA": {
+      "label": "EM and dev econ incl sel adv econ"
+    },
+    "MDRI": {
+      "label": "MDRI countries "
+    },
+    "ME": {
+      "label": "Middle East (Analytical)"
+    },
+    "MENA": {
+      "label": "Middle East and North Africa"
+    },
+    "MIC": {
+      "label": "Middle-income countries"
+    },
+    "MIC854": {
+      "label": "MICs excluding Nigeria and South Africa "
+    },
+    "NO824": {
+      "label": "Non-oil"
+    },
+    "NONC872": {
+      "label": "Coastal  "
+    },
+    "NONRESINT": {
+      "label": "Non-resource-intensive countires  "
+    },
+    "OAE": {
+      "label": "Other advanced economies"
+    },
+    "OEMDC": {
+      "label": "Emerging market and developing economies"
+    },
+    "OEXP": {
+      "label": "Oil-exporting countries"
+    },
+    "OIM808": {
+      "label": "Oil-importing countries excluding South Africa "
+    },
+    "OIMP": {
+      "label": "Oil-importing countries "
+    },
+    "OTH": {
+      "label": "Other Groups"
+    },
+    "OXEN853": {
+      "label": "Oil-exporting countries excluding Nigeria "
+    },
+    "PRGF": {
+      "label": "Countries eligible for PRGF"
+    },
+    "RESINT": {
+      "label": "Resource-intensive countries  "
+    },
+    "SACU": {
+      "label": "SACU"
+    },
+    "SADC": {
+      "label": "SADC"
+    },
+    "SSA": {
+      "label": "Sub-Saharan Africa"
+    },
+    "WAEMU": {
+      "label": "WAEMU"
+    },
+    "WE": {
+      "label": "Latin America and the Caribbean"
+    },
+    "WEOWORLD": {
+      "label": "World"
+    },
+    "FAD_WORLD": {
+      "label": "World"
+    },
+    "FAD_G20": {
+      "label": "G-20"
+    },
+    "FAD_G20Adv": {
+      "label": "G-20 Advanced"
+    },
+    "FAD_G20Emg": {
+      "label": "G-20 Emerging"
+    },
+    "FAD_LIC": {
+      "label": "Low Income"
+    },
+    "LICXF": {
+      "label": "LICs excluding low income countries in fragile and conflict-affected situations"
+    },
+    "SSENS": {
+      "label": "SSA excluding Nigeria and South Africa "
+    },
+    "FM_EMG": {
+      "label": "Emerging Market and Middle-Income Economies"
+    },
+    "SSXZ": {
+      "label": "SSA excluding Zimbabwe"
+    },
+    "SSXSD": {
+      "label": "Sub-Saharan Africa, excluding South Sudan"
+    },
+    "MENAP": {
+      "label": "Middle East, North Africa, Afghanistan, and Pakistan"
+    },
+    "ECOWAS": {
+      "label": "Economic Community of West African States"
+    },
+    "BOPWORLD": {
+      "label": "World"
+    },
+    "IIO": {
+      "label": "International Organizations"
+    },
+    "EDE": {
+      "label": "Emerging and Developing Europe"
+    },
+    "FM_LIC": {
+      "label": "Low-Income Countries"
+    },
+    "FM_AdvG20": {
+      "label": "Advanced G-20"
+    },
+    "FM_EMEG20": {
+      "label": "Emerging G-20"
+    },
+    "FM_EMEEU": {
+      "label": "Emerging and Middle-Income Europe"
+    },
+    "FM_EMEAsia": {
+      "label": "Emerging and Middle-Income Asia"
+    },
+    "FM_EMELA": {
+      "label": "Emerging and Middle-Income Latin America"
+    },
+    "FM_EMEME": {
+      "label": "Emerging and Middle-Income Middle East and North Africa and Pakistan"
+    },
+    "FM_LICAsia": {
+      "label": "Low-Income Developing Asia"
+    },
+    "FM_LICLA": {
+      "label": "Low-Income Developing Latin America"
+    },
+    "FM_LICSSA": {
+      "label": "Low-Income Developing Sub-Saharan Africa"
+    },
+    "FM_LICO": {
+      "label": "Low-Income Developing Others"
+    },
+    "FM_LICOP": {
+      "label": "Low-Income Developing Oil Producers"
+    },
+    "FM_LIDC": {
+      "label": "Low-Income Developing Countries"
+    },
+    "CIS": {
+      "label": "Commonwealth of Independent States"
+    },
+    "CFWORLD": {
+      "label": "World"
+    },
+    "ARAWORLD": {
+      "label": "World"
+    },
+    "SPR_HIC": {
+      "label": "High Income Countries (median)"
+    },
+    "SPR_LIDC": {
+      "label": "Low-Income Developing Countries (median)"
+    },
+    "SPR_FLIDC": {
+      "label": "Frontier LIDCs (median)"
+    },
+    "SPR_GD_AM": {
+      "label": "Advanced Economies"
+    },
+    "SPR_GD_LIDC": {
+      "label": "Low Income Developing Countries"
+    },
+    "SPR_GD_EM": {
+      "label": "Emerging Markets"
+    },
+    "gbtier_1": {
+      "label": "Prominent gender budgeting countries covered in the surveys"
+    },
+    "gbtier_2": {
+      "label": "Other gender budgeting countries covered in the surveys"
+    },
+    "gbcasestudy": {
+      "label": "Identified as gender budgeting country in IMF regional survey"
+    },
+    "gb_othersource": {
+      "label": "Other countries"
+    },
+    "GDWORLD": {
+      "label": "World"
+    },
+    "ECCU": {
+      "label": "Eastern Caribbean Currency Union"
+    },
+    "FAD_C1": {
+      "label": "Catergory I"
+    },
+    "FAD_NG20": {
+      "label": "Non G-20"
+    },
+    "FAD_C2": {
+      "label": "Catergory II"
+    },
+    "FAD_OP": {
+      "label": "Oil Producers"
+    },
+    "FAD_NOHIC": {
+      "label": "Non-Oil High Income"
+    },
+    "FAD_NOMIC": {
+      "label": "Non-Oil Middle Income"
+    },
+    "FAD_NOLIC": {
+      "label": "Non-Oil Low Income"
+    },
+    "FAD_C3": {
+      "label": "Catergory III"
+    },
+    "FAD_NOFAST": {
+      "label": "Non-Oil Fast"
+    },
+    "FAD_NOMED": {
+      "label": "Non-Oil Medium"
+    },
+    "FAD_NOSLOW": {
+      "label": "Non-Oil Slow"
+    },
+    "FAD_C4": {
+      "label": "Catergory IV"
+    },
+    "FAD_G7": {
+      "label": "G-7"
+    },
+    "FAD_NG7": {
+      "label": "None G-7"
+    },
+    "FAD_C5": {
+      "label": "Catergory V"
+    },
+    "FAD_EuroArea": {
+      "label": "Euro Area"
+    },
+    "FAD_EMAsia": {
+      "label": "Emerging Asia"
+    },
+    "FAD_OtherAdv": {
+      "label": "Other Advanced"
+    },
+    "FAD_Rest": {
+      "label": "Rest"
+    },
+    "FAD_C6": {
+      "label": "Catergory VI"
+    },
+    "FAD_WHD": {
+      "label": "Western Hemisphere Group"
+    },
+    "FAD_MCD": {
+      "label": "Middle East and Central Asia Group"
+    },
+    "FAD_APD": {
+      "label": "Asia & Pacific Group"
+    },
+    "FAD_AFR": {
+      "label": "African Group"
+    },
+    "FAD_EUR": {
+      "label": "European Group"
+    },
+    "FAD_ADV": {
+      "label": "Advanced Economies"
+    },
+    "FAD_EME": {
+      "label": "Emerging Market"
+    },
+    "FAD_EMD": {
+      "label": "Emerging and Developing Countries "
+    },
+    "FADGDWORLD": {
+      "label": "All countries - Global Debt"
+    },
+    "MECA": {
+      "label": "Middle East and Central Asia"
+    },
+    "CCWORLD": {
+      "label": "World"
+    },
+    "FR_FCWORLD": {
+      "label": "All countries - Fiscal Rules & Fiscal Councils"
+    },
+    "FR_FC_ADV": {
+      "label": "Advanced Economies"
+    },
+    "FR_FC_EME": {
+      "label": "Emerging Market and Developing Economies"
+    },
+    "FR_FC_EU": {
+      "label": "European Union"
+    },
+    "FR_FC_NonEU": {
+      "label": "Non European Union"
+    },
+    "EME": {
+      "label": "Emerging market economies"
+    }
+  },
+  "api": {
+    "version": "2",
+    "output-method": "json"
+  }
+}

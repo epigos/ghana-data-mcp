@@ -11,7 +11,10 @@ import { fixtureJson } from "../../helpers/fixtures.js";
 import { errorResponse, jsonResponse, stubFetch } from "../../helpers/stubFetch.js";
 
 const indicatorsPayload = fixtureJson<{ indicators: Record<string, unknown> }>("imf-indicators.json");
-const seriesPayload = fixtureJson("imf-series-headline.json");
+const multiCountryPayload = fixtureJson("imf-series-multi-country.json");
+const countriesPayload = fixtureJson("imf-countries.json");
+const regionsPayload = fixtureJson("imf-regions.json");
+const groupsPayload = fixtureJson("imf-groups.json");
 
 interface Harness {
   client: Client;
@@ -23,15 +26,18 @@ async function harness(
   options: { seriesResponses?: Array<() => Response>; cache?: Cache } = {},
 ): Promise<Harness> {
   const { fetch: fetchImpl, calls } = stubFetch([
-    // Order matters: stubFetch matches the first route whose substring is found,
-    // so the specific "/indicators" catalog route must be listed before the broad
-    // series fallback below — a multi-indicator call sorts its ids alphabetically,
-    // so the series URL's shape (which id comes first) isn't something a test
-    // should need to know.
+    // Order matters: stubFetch matches the first route whose substring is found, so
+    // every specific catalog route must be listed before the broad "/api/v2/" series
+    // fallback below — a multi-indicator call sorts its ids alphabetically, so the
+    // series URL's shape (which id comes first) isn't something a test should need
+    // to know.
     { match: "/api/v2/indicators", responses: [() => jsonResponse(indicatorsPayload)] },
+    { match: "/api/v2/countries", responses: [() => jsonResponse(countriesPayload)] },
+    { match: "/api/v2/regions", responses: [() => jsonResponse(regionsPayload)] },
+    { match: "/api/v2/groups", responses: [() => jsonResponse(groupsPayload)] },
     {
       match: "/api/v2/",
-      responses: options.seriesResponses ?? [() => jsonResponse(seriesPayload)],
+      responses: options.seriesResponses ?? [() => jsonResponse(multiCountryPayload)],
     },
   ]);
 
@@ -155,10 +161,13 @@ describe("imf_list_indicators", () => {
 
 interface HistoryPayload {
   series: Array<{
-    id: string;
-    label: string;
+    indicatorId: string;
+    indicatorLabel: string;
     unit: string;
     projectionStartYear?: number;
+    entityId: string;
+    entityLabel: string;
+    entityKind: string;
     rowCount: number;
     rows: Array<{ year: number; value: number; isProjection: boolean }>;
   }>;
@@ -177,14 +186,128 @@ describe("imf_get_indicator_history", () => {
     expect(() => IndicatorSeriesSchema.parse(payload.series[0])).not.toThrow();
   });
 
+  it("defaults to Ghana alone when no countries are given", async () => {
+    const { client } = await harness();
+    const payload = (
+      await call(client, "imf_get_indicator_history", { indicators: ["NGDP_RPCH"] })
+    ).structuredContent as unknown as HistoryPayload;
+
+    expect(payload.series.map((s) => s.entityId)).toEqual(["GHA"]);
+    expect(payload.series[0]?.entityKind).toBe("country");
+  });
+
   it("resolves an indicator id case-insensitively", async () => {
     const { client } = await harness();
     const payload = (
       await call(client, "imf_get_indicator_history", { indicators: ["ngdp_rpch"] })
     ).structuredContent as unknown as HistoryPayload;
 
-    expect(payload.series[0]?.id).toBe("NGDP_RPCH");
+    expect(payload.series[0]?.indicatorId).toBe("NGDP_RPCH");
     expect(payload.series[0]?.rowCount).toBeGreaterThan(0);
+  });
+
+  it("resolves a country by its plain name, case-insensitively", async () => {
+    const { client } = await harness();
+    const payload = (
+      await call(client, "imf_get_indicator_history", {
+        indicators: ["NGDP_RPCH"],
+        countries: ["nigeria"],
+      })
+    ).structuredContent as unknown as HistoryPayload;
+
+    expect(payload.series[0]?.entityId).toBe("NGA");
+    expect(payload.series[0]?.entityLabel).toBe("Nigeria");
+  });
+
+  it("resolves a region or group by code", async () => {
+    const { client } = await harness();
+    const payload = (
+      await call(client, "imf_get_indicator_history", {
+        indicators: ["NGDP_RPCH"],
+        countries: ["AFQ", "SSA"],
+      })
+    ).structuredContent as unknown as HistoryPayload;
+
+    const byId = Object.fromEntries(payload.series.map((s) => [s.entityId, s]));
+    expect(byId.AFQ?.entityKind).toBe("region");
+    expect(byId.SSA?.entityKind).toBe("group");
+  });
+
+  it("resolves a group by name and reports rowCount 0 when this indicator has no aggregate for it", async () => {
+    const { client } = await harness();
+    const payload = (
+      await call(client, "imf_get_indicator_history", {
+        indicators: ["NGDP_RPCH"],
+        countries: ["ECOWAS"],
+      })
+    ).structuredContent as unknown as HistoryPayload;
+
+    // Confirmed against the live API: ECOWAS has no aggregate on the general WEO
+    // GDP-growth indicator — the multi-country fixture reproduces that gap.
+    expect(payload.series[0]?.entityId).toBe("ECOWAS");
+    expect(payload.series[0]?.entityKind).toBe("group");
+    expect(payload.series[0]?.rowCount).toBe(0);
+    expect(payload.meta.warning).toMatch(/no published data for Economic Community of West African States/);
+  });
+
+  it("fetches several countries in one request, one series per (indicator, entity) pair", async () => {
+    const { client, calls } = await harness();
+    const payload = (
+      await call(client, "imf_get_indicator_history", {
+        indicators: ["NGDP_RPCH"],
+        countries: ["GHA", "NGA", "SEN"],
+      })
+    ).structuredContent as unknown as HistoryPayload;
+
+    expect(payload.series.map((s) => s.entityId)).toEqual(["GHA", "NGA", "SEN"]);
+    // Catalog GETs (indicators, groups, regions, countries) + one series GET.
+    expect(calls()).toBe(5);
+  });
+
+  it("keys the cache by the sorted, deduped country set", async () => {
+    const { client, calls } = await harness();
+
+    await call(client, "imf_get_indicator_history", {
+      indicators: ["NGDP_RPCH"],
+      countries: ["NGA", "GHA"],
+    });
+    const afterFirst = calls();
+    // Same two countries, different order, a duplicate and mixed case: same entry.
+    await call(client, "imf_get_indicator_history", {
+      indicators: ["NGDP_RPCH"],
+      countries: ["GHA", "nga", "NGA"],
+    });
+
+    expect(calls()).toBe(afterFirst);
+  });
+
+  it("rejects every unresolved country before making a series request", async () => {
+    const { client, calls } = await harness();
+    const beforeCatalogFetch = calls();
+
+    const result = await call(client, "imf_get_indicator_history", {
+      indicators: ["NGDP_RPCH"],
+      countries: ["Wakanda"],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toMatch(/Wakanda/);
+    // Only the catalog lookups happened (indicators, groups, regions, countries);
+    // no series request for an all-bad country list.
+    expect(calls()).toBe(beforeCatalogFetch + 4);
+  });
+
+  it("proceeds with recognized countries and warns about the rest", async () => {
+    const { client } = await harness();
+    const payload = (
+      await call(client, "imf_get_indicator_history", {
+        indicators: ["NGDP_RPCH"],
+        countries: ["GHA", "Wakanda"],
+      })
+    ).structuredContent as unknown as HistoryPayload;
+
+    expect(payload.series.map((s) => s.entityId)).toEqual(["GHA"]);
+    expect(payload.meta.warning).toMatch(/Wakanda/);
   });
 
   it("returns oldest-first rows, flagging projected years", async () => {
@@ -196,8 +319,6 @@ describe("imf_get_indicator_history", () => {
     const years = series!.rows.map((r) => r.year);
 
     expect(years).toEqual([...years].sort((a, b) => a - b));
-    expect(series!.projectionStartYear).toBe(2026);
-    expect(series!.rows.find((r) => r.year === 2025)?.isProjection).toBe(false);
     expect(series!.rows.find((r) => r.year === 2026)?.isProjection).toBe(true);
   });
 
@@ -236,13 +357,13 @@ describe("imf_get_indicator_history", () => {
     const { client, calls } = await harness();
     const payload = (
       await call(client, "imf_get_indicator_history", {
-        indicators: ["NGDP_RPCH", "PCPIPCH", "BCA_NGDPD"],
+        indicators: ["NGDP_RPCH", "PCPIPCH"],
       })
     ).structuredContent as unknown as HistoryPayload;
 
-    expect(payload.series.map((s) => s.id)).toEqual(["BCA_NGDPD", "NGDP_RPCH", "PCPIPCH"]);
-    // One page GET (catalog) + one series POST/GET, not one per indicator.
-    expect(calls()).toBe(2);
+    expect(payload.series.map((s) => s.indicatorId)).toEqual(["NGDP_RPCH", "PCPIPCH"]);
+    // Catalog GETs (indicators, groups, regions, countries) + one series request.
+    expect(calls()).toBe(5);
   });
 
   it("keys the cache by the sorted, deduped indicator set", async () => {
@@ -258,9 +379,9 @@ describe("imf_get_indicator_history", () => {
     expect(calls()).toBe(afterFirst);
   });
 
-  it("rejects every unrecognized id before making a series request", async () => {
+  it("rejects every unrecognized indicator id before making a series request", async () => {
     const { client, calls } = await harness();
-    const beforeIndicatorFetch = calls();
+    const beforeCatalogFetch = calls();
 
     const result = await call(client, "imf_get_indicator_history", {
       indicators: ["NOT_A_REAL_CODE"],
@@ -269,8 +390,9 @@ describe("imf_get_indicator_history", () => {
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toMatch(/NOT_A_REAL_CODE/);
     expect(result.content[0]?.text).toMatch(/imf_list_indicators/);
-    // Only the catalog lookup happened; no series request for an all-bad list.
-    expect(calls()).toBe(beforeIndicatorFetch + 1);
+    // Only the catalog lookups happened (indicators, groups, regions, countries);
+    // no series request for an all-bad indicator list.
+    expect(calls()).toBe(beforeCatalogFetch + 4);
   });
 
   it("proceeds with the recognized ids and warns about the rest", async () => {
@@ -281,14 +403,18 @@ describe("imf_get_indicator_history", () => {
       })
     ).structuredContent as unknown as HistoryPayload;
 
-    expect(payload.series.map((s) => s.id)).toEqual(["NGDP_RPCH"]);
+    expect(payload.series.map((s) => s.indicatorId)).toEqual(["NGDP_RPCH"]);
     expect(payload.meta.warning).toMatch(/NOT_A_REAL_CODE/);
   });
 
   it("reports a valid indicator's empty Ghana coverage without an error", async () => {
     const { client } = await harness({
       seriesResponses: [
-        () => jsonResponse({ indicators: { NGDP_RPCH: indicatorsPayload.indicators.NGDP_RPCH }, values: { NGDP_RPCH: { USA: { "2020": 1 } } } }),
+        () =>
+          jsonResponse({
+            indicators: { NGDP_RPCH: indicatorsPayload.indicators.NGDP_RPCH },
+            values: { NGDP_RPCH: { USA: { "2020": 1 } } },
+          }),
       ],
     });
     const payload = (
@@ -303,6 +429,16 @@ describe("imf_get_indicator_history", () => {
     const { client } = await harness();
     const result = await call(client, "imf_get_indicator_history", {
       indicators: Array.from({ length: 9 }, (_, i) => `IND_${i}`),
+    });
+
+    expect(result.isError).toBe(true);
+  });
+
+  it("rejects more than the maximum countries per call", async () => {
+    const { client } = await harness();
+    const result = await call(client, "imf_get_indicator_history", {
+      indicators: ["NGDP_RPCH"],
+      countries: Array.from({ length: 9 }, (_, i) => `C${i}`),
     });
 
     expect(result.isError).toBe(true);

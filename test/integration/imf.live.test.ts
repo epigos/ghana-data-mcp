@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { ImfClient } from "../../src/sources/imf/client.js";
-import { parseIndicatorsPayload, parseSeriesPayload } from "../../src/sources/imf/parser.js";
+import { parseEntitiesPayload, parseIndicatorsPayload, parseSeriesPayload } from "../../src/sources/imf/parser.js";
+import type { EntityMeta } from "../../src/sources/imf/types.js";
+
+const GHA: EntityMeta = { id: "GHA", label: "Ghana", kind: "country" };
+const NGA: EntityMeta = { id: "NGA", label: "Nigeria", kind: "country" };
 
 /**
  * Live canary for the IMF DataMapper source — skipped unless GSE_LIVE=1.
@@ -30,9 +34,11 @@ describe.skipIf(!live)("IMF DataMapper (live)", () => {
   }, 45_000);
 
   it("still returns Ghana's GDP growth, oldest first, with a real projection boundary", async () => {
-    const { series, skipped } = parseSeriesPayload(await client.fetchSeries(["NGDP_RPCH"]), [
-      "NGDP_RPCH",
-    ]);
+    const { series, skipped } = parseSeriesPayload(
+      await client.fetchSeries(["NGDP_RPCH"]),
+      ["NGDP_RPCH"],
+      [GHA],
+    );
 
     expect(skipped).toBe(0);
     const [s] = series;
@@ -49,13 +55,43 @@ describe.skipIf(!live)("IMF DataMapper (live)", () => {
   }, 45_000);
 
   it("still fetches multiple indicators in one request", async () => {
-    const { series } = parseSeriesPayload(await client.fetchSeries(["NGDP_RPCH", "PCPIPCH"]), [
-      "NGDP_RPCH",
-      "PCPIPCH",
-    ]);
+    const { series } = parseSeriesPayload(
+      await client.fetchSeries(["NGDP_RPCH", "PCPIPCH"]),
+      ["NGDP_RPCH", "PCPIPCH"],
+      [GHA],
+    );
 
     expect(series).toHaveLength(2);
     for (const s of series) expect(s.rowCount).toBeGreaterThan(0);
+  }, 45_000);
+
+  it("still returns the country/region/group catalogs, with Ghana present", async () => {
+    const countries = parseEntitiesPayload(await client.fetchEntities("country"), "country");
+    const regions = parseEntitiesPayload(await client.fetchEntities("region"), "region");
+    const groups = parseEntitiesPayload(await client.fetchEntities("group"), "group");
+
+    expect(Object.keys(countries).length).toBeGreaterThan(100);
+    expect(countries.GHA?.label).toBe("Ghana");
+    expect(Object.keys(regions).length).toBeGreaterThan(5);
+    expect(Object.keys(groups).length).toBeGreaterThan(5);
+  }, 45_000);
+
+  // The scenario that motivated multi-country support: a caller resolves a
+  // neighbor by name (not code) and reads each entity's own real row out of the
+  // same response Ghana's data already comes from — no separate request per
+  // country.
+  it("still reads each entity's own row when several countries share one request", async () => {
+    const { series } = parseSeriesPayload(
+      await client.fetchSeries(["NGDP_RPCH"]),
+      ["NGDP_RPCH"],
+      [GHA, NGA],
+    );
+
+    expect(series).toHaveLength(2);
+    for (const s of series) expect(s.rowCount).toBeGreaterThan(30);
+    const ghanaLatest = series.find((s) => s.entityId === "GHA")?.rows.at(-1)?.value;
+    const nigeriaLatest = series.find((s) => s.entityId === "NGA")?.rows.at(-1)?.value;
+    expect(ghanaLatest).not.toBe(nigeriaLatest);
   }, 45_000);
 
   // If IMF ever starts honoring these, the tool should switch to pushing the

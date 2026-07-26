@@ -1,6 +1,7 @@
 import { ParseError } from "../../lib/errors.js";
 import { request, type RequestOptions } from "../../lib/http.js";
 import { silentLogger, type Logger } from "../../lib/log.js";
+import type { EntityKind } from "./types.js";
 
 /**
  * IMF DataMapper access.
@@ -19,7 +20,7 @@ import { silentLogger, type Logger } from "../../lib/log.js";
  *    WAF, which serves a 200 with an HTML "Request Rejected" body instead of JSON.
  *
  * So this client sends indicator ids only, never a country/region/group segment and
- * never any querystring, and leaves both the country slice and the year window to
+ * never any querystring, and leaves both the entity slice and the year window to
  * `parser.ts` to apply after the fact. See docs/IMF.md for how each of these was
  * verified against the live API.
  *
@@ -30,6 +31,17 @@ import { silentLogger, type Logger } from "../../lib/log.js";
 
 export const IMF_BASE_URL = "https://www.imf.org";
 const API_PATH = "/external/datamapper/api/v2";
+
+/**
+ * Maps an entity kind to the catalog endpoint that lists it. A country, a region
+ * and an analytical group are the same kind of code as far as a series request is
+ * concerned — the split only exists for these three catalog lookups.
+ */
+const ENTITY_PATH: Record<EntityKind, string> = {
+  country: "countries",
+  region: "regions",
+  group: "groups",
+};
 
 export interface ImfClientOptions extends RequestOptions {
   baseUrl?: string;
@@ -54,10 +66,18 @@ export class ImfClient {
     return this.getJson(`${API_PATH}/indicators`, "GET /indicators");
   }
 
+  /** The full catalog of one entity kind — every country, region, or group DataMapper knows. */
+  async fetchEntities(kind: EntityKind): Promise<unknown> {
+    const path = ENTITY_PATH[kind];
+    this.logger.info("imf: fetching entity catalog", { kind });
+    return this.getJson(`${API_PATH}/${path}`, `GET /${path}`);
+  }
+
   /**
-   * One or more indicators' full time series, every country, every year. The
-   * caller narrows to Ghana and to a year window after the fact — see the class
-   * doc for why that cannot be pushed upstream.
+   * One or more indicators' full time series, every country, region and group,
+   * every year. The caller narrows to whichever entities and year window it
+   * actually wants after the fact — see the class doc for why that cannot be
+   * pushed upstream.
    */
   async fetchSeries(indicatorIds: readonly string[]): Promise<unknown> {
     if (indicatorIds.length === 0) {

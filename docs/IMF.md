@@ -1,9 +1,11 @@
 # IMF (`imf_*`)
 
-Macroeconomic indicators for Ghana from the [IMF DataMapper](https://www.imf.org/external/datamapper/profile/GHA)
+Macroeconomic indicators from the [IMF DataMapper](https://www.imf.org/external/datamapper/profile/GHA)
 — GDP, inflation, government debt, the current account, and around 130 others
-spanning the World Economic Outlook and several other IMF datasets. Two tools,
-both read-only.
+spanning the World Economic Outlook and several other IMF datasets. Defaults to
+Ghana, but any country, region, or analytical group (e.g. Nigeria, Sub-Saharan
+Africa, ECOWAS) DataMapper tracks can be requested alongside it, by code or by
+plain name. Two tools, both read-only.
 
 Figures in this document were captured on **2026-07-26** and show the shape of a
 response, not current figures.
@@ -23,7 +25,7 @@ Running the server and connecting a client are covered once in the
 | Tool | Returns |
 | ---- | ------- |
 | `imf_list_indicators` | Search the ~130-indicator catalog by keyword; returns the code each match needs |
-| `imf_get_indicator_history` | Ghana's time series for one or more indicators |
+| `imf_get_indicator_history` | Time series for one or more indicators, for Ghana and — optionally — other countries, regions or analytical groups |
 
 ### `imf_list_indicators`
 
@@ -66,22 +68,26 @@ growth-rate percent in the FPP dataset) genuinely publish no unit.
 
 ### `imf_get_indicator_history`
 
-Ghana's own series for one or more indicators, oldest first.
+One series per (indicator, country/region/group) pair, oldest first.
 
 | Input        | Type     | Notes                                                          |
 | ------------ | -------- | ---------------------------------------------------------------- |
 | `indicators` | string[] | 1–8 codes, e.g. `["NGDP_RPCH", "PCPIPCH"]`. Case-insensitive.     |
+| `countries`  | string[] | 1–8 countries, regions or groups to compare. Accepts an IMF code (`"NGA"`), a plain name (`"Nigeria"`), or a region/group name (`"Sub-Saharan Africa"`, `"ECOWAS"`). Case-insensitive. Omit for Ghana alone. |
 | `startYear`  | number   | Omit for the earliest year available.                            |
 | `endYear`    | number   | Omit for the latest — which usually means IMF's own forecasts, see below. |
 
 ```json
 {
-  "id": "NGDP_RPCH",
-  "label": "Real GDP growth",
+  "indicatorId": "NGDP_RPCH",
+  "indicatorLabel": "Real GDP growth",
   "unit": "Annual percent change",
   "source": "World Economic Outlook (April 2026)",
   "dataset": "WEO",
   "projectionStartYear": 2026,
+  "entityId": "GHA",
+  "entityLabel": "Ghana",
+  "entityKind": "country",
   "rowCount": 10,
   "rows": [
     { "year": 2018, "value": 6.2, "isProjection": false },
@@ -95,21 +101,48 @@ Ghana's own series for one or more indicators, oldest first.
 Real output for `indicators: ["NGDP_RPCH", "PCPIPCH"], startYear: 2018, endYear: 2027`:
 
 ```
-NGDP_RPCH (Real GDP growth, % change)
+NGDP_RPCH (Real GDP growth, % change) — Ghana
   2018  6.2    2022  3.8    2026  4.8  ← projection
   2019  6.5    2023  3.1    2027  4.9  ← projection
   2020  0.5    2024  5.8
   2021  5.1    2025  6.0
 
-PCPIPCH (Inflation, average consumer prices, % change)
+PCPIPCH (Inflation, average consumer prices, % change) — Ghana
   2018  9.8    2022  31.9   2026  5.8  ← projection
   2019  7.2    2023  39.2   2027  7.8  ← projection
   2020  9.9    2024  22.9
   2021  10.0   2025  14.2
 ```
 
-Passing several indicators fetches them in a single upstream request rather than
-one per indicator — see [how the data is fetched](#how-the-data-is-fetched).
+Passing several indicators, several countries, or both fetches everything in a
+single upstream request rather than one per indicator or per country — see
+[how the data is fetched](#how-the-data-is-fetched). The result is a flat list of
+series, one per (indicator, entity) pair, ordered indicators-major then entities —
+for two indicators and two countries, that's four series in the order
+`[ind1×countryA, ind1×countryB, ind2×countryA, ind2×countryB]`.
+
+### Comparing across countries
+
+`countries` accepts three kinds of things DataMapper tracks as the same shape of
+code: individual countries (`GHA`, `NGA`, or by name — `"Nigeria"`), IMF regions
+(`AFQ` — "Africa (Region)"), and analytical groups (`SSA` — "Sub-Saharan Africa",
+`ECOWAS`). An exact code always wins outright; otherwise the best label match is
+used, so `"Nigeria"`, `"nigeria"`, and `"NGA"` all resolve to the same entity.
+
+**Region and group aggregates are published per-indicator, not universally** —
+this is the one thing worth checking rather than assuming. Confirmed directly
+against the live API: `ECOWAS` has no aggregate on the general WEO real-GDP-growth
+indicator (`NGDP_RPCH`) but does have one on the Africa-specific REO equivalent
+(`NGDP_R_PCH`). A region/group series with `rowCount: 0` means exactly that — IMF
+never published an aggregate for it on this particular indicator — the same "no
+data" outcome as a country lacking coverage, not an error. Always check `rowCount`
+before reporting a comparison; don't assume a regional bloc has a figure just
+because the countries in it do.
+
+A country you name that isn't recognized is skipped with a warning rather than
+failing the whole call, as long as at least one requested country/indicator
+resolves — the same behavior `imf_list_indicators`-style typo tolerance gives on
+the indicator side.
 
 ## Reading the data correctly
 
@@ -132,12 +165,13 @@ account openness index, last updated 2016) simply never has a row at or after it
 own `projection-year`, so the flag correctly never fires for it without any special
 casing.
 
-### Not every indicator covers Ghana
+### Not every indicator covers every country
 
 Of the ~130 published indicators, several have no Ghana row at all — unemployment
 (`LUR`), for one, covers 122 countries and Ghana is not among them. That comes back
-as `rowCount: 0` with `meta.warning` naming which indicator was empty, not as an
-error: the indicator is real, it simply has no data for this country.
+as `rowCount: 0` with `meta.warning` naming which entity was empty, not as an
+error: the indicator is real, it simply has no data for this country (or, per
+above, this region/group).
 
 ### Coverage varies a lot by indicator
 
@@ -152,6 +186,16 @@ assuming a fixed window.
 
 `imf_get_indicator_history({ indicators: ["NGDP_RPCH"] })`. Read the last few rows;
 the most recent one or two are likely `isProjection: true`.
+
+> **How does that compare to other West African economies?**
+
+`imf_get_indicator_history({ indicators: ["NGDP_RPCH"], countries: ["GHA", "Nigeria", "Senegal", "ECOWAS"] })`.
+Four series come back, one per entity, in the order requested after
+deduping/sorting. Check each one's `rowCount` before comparing — a region/group
+aggregate like `ECOWAS` may be `0` on this particular indicator even though every
+individual country in it has data (see [Comparing across countries](#comparing-across-countries));
+report that as "no ECOWAS-wide figure published for this indicator," not as a gap
+in the tool.
 
 > **How does Ghana's current account balance compare with its government debt?**
 
@@ -198,11 +242,19 @@ against the live API, **does not work**:
   answers with a 200 status and an HTML "Request Rejected" body instead of JSON.
 
 So this client sends indicator ids only, never a country segment and never any
-querystring, and leaves the Ghana slice and the year window to be applied after the
-fact. Multiple indicator ids in one path *does* work —
-`/NGDP_RPCH/PCPIPCH` returns both under their own keys in one response — which is
-what lets `imf_get_indicator_history` fetch several indicators in a single request
-rather than one round trip each.
+querystring, and leaves the entity slice (Ghana, or whichever countries/regions/
+groups were requested) and the year window to be applied after the fact. Multiple
+indicator ids in one path *does* work — `/NGDP_RPCH/PCPIPCH` returns both under
+their own keys in one response — which is what lets `imf_get_indicator_history`
+fetch several indicators in a single request rather than one round trip each. Since
+every request already returns every country, region and group regardless, reading
+out several entities from that same response was free once one worked — no
+additional upstream capability was needed to support `countries`.
+
+A separate `/countries`, `/regions` and `/groups` catalog (241, 27 and 129 entries
+respectively, as of this writing) is fetched once and cached to resolve a plain
+name like `"Nigeria"` or `"ECOWAS"` to its code — the same shape of validate-before-
+fetch that `imf_list_indicators`'s catalog already does for indicator ids.
 
 Two silent-failure modes worth knowing if you touch this code:
 
@@ -224,11 +276,14 @@ status GSE and BoG can return, already handled by the shared request logic in
 
 ### Caching
 
-| Key                                    | Fresh for | Notes                                    |
-| --------------------------------------- | --------- | ------------------------------------------ |
-| `imf:indicators:v1`                     | 7 days    | The catalog changes a few times a year at most |
-| `imf:series:v1:{sorted,deduped,ids}`    | 24 hours  | Whole series cached; `startYear`/`endYear` applied after retrieval |
+| Key                                          | Fresh for | Notes                                    |
+| --------------------------------------------- | --------- | ------------------------------------------ |
+| `imf:indicators:v1`                           | 7 days    | The indicator catalog changes a few times a year at most |
+| `imf:entities:v1`                             | 7 days    | Countries, regions and groups combined — changes even less often |
+| `imf:series:v1:{ids}:{countries}`             | 24 hours  | Whole series cached; `startYear`/`endYear` applied after retrieval |
 
-The series cache key is built from the requested ids after deduping and sorting, so
-`["PCPIPCH", "NGDP_RPCH"]` and `["NGDP_RPCH", "PCPIPCH", "ngdp_rpch"]` share one
-cache entry — order and case don't fragment the cache.
+The series cache key is built from both the requested indicator ids and the
+resolved country/region/group ids, each deduped and sorted independently, so
+`{ indicators: ["PCPIPCH", "NGDP_RPCH"], countries: ["NGA", "GHA"] }` and
+`{ indicators: ["NGDP_RPCH", "PCPIPCH", "ngdp_rpch"], countries: ["GHA", "nga", "NGA"] }`
+share one cache entry — order, case and repetition don't fragment the cache.
