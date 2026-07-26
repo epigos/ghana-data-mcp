@@ -1,4 +1,5 @@
 import { ParseError } from "../../lib/errors.js";
+import { stripHtml } from "../../lib/text.js";
 import type { BillRate, InterbankFxRate, InterestRatePoint } from "./types.js";
 
 /**
@@ -129,8 +130,8 @@ export function parseInterbankFxPayload(
     }
 
     const date = parseBogDate(raw[FX_COLUMNS.date]);
-    const currency = text(raw[FX_COLUMNS.currency]);
-    const pair = text(raw[FX_COLUMNS.pair]).toUpperCase();
+    const currency = stripHtml(raw[FX_COLUMNS.currency]);
+    const pair = stripHtml(raw[FX_COLUMNS.pair]).toUpperCase();
     if (!date || !currency || !pair) {
       skipped++;
       continue;
@@ -161,14 +162,6 @@ export function parseInterbankFxPayload(
     a.date === b.date ? a.pair.localeCompare(b.pair) : a.date < b.date ? -1 : 1,
   );
   return { rows, skipped };
-}
-
-function text(value: unknown): string {
-  if (typeof value !== "string") return "";
-  return value
-    .replace(/<[^>]*>/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function extractDataArray(payload: unknown): unknown[] {
@@ -247,7 +240,7 @@ export function parseBillRatePayload(
     }
 
     const date = parseBogDate(raw[BILL_RATE_COLUMNS.date]);
-    const securityType = text(raw[BILL_RATE_COLUMNS.securityType]);
+    const securityType = stripHtml(raw[BILL_RATE_COLUMNS.securityType]);
     if (!date || !securityType) {
       skipped++;
       continue;
@@ -265,7 +258,7 @@ export function parseBillRatePayload(
     const tenorDays = parseTenorDays(securityType);
     // Tender numbers arrive with thousands separators (`1,517`); they are
     // identifiers, so the separator is noise rather than magnitude.
-    const tenderNumber = text(raw[BILL_RATE_COLUMNS.tenderNumber]).replace(/,/g, "");
+    const tenderNumber = stripHtml(raw[BILL_RATE_COLUMNS.tenderNumber]).replace(/,/g, "");
 
     rows.push({
       date,
@@ -328,7 +321,7 @@ export function parseInterestRatePayload(
       continue;
     }
 
-    const date = parseBogDate(text(raw[INTEREST_RATE_COLUMNS.date]));
+    const date = parseBogDate(stripHtml(raw[INTEREST_RATE_COLUMNS.date]));
     const rate = parseNumber(raw[INTEREST_RATE_COLUMNS.rate]);
     if (!date || rate === null) {
       skipped++;

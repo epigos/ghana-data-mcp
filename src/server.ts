@@ -9,6 +9,8 @@ import { BogClient } from "./sources/bog/client.js";
 import { registerBogTools } from "./sources/bog/tools.js";
 import { GseClient } from "./sources/gse/client.js";
 import { registerGseTools } from "./sources/gse/tools.js";
+import { ImfClient } from "./sources/imf/client.js";
+import { registerImfTools } from "./sources/imf/tools.js";
 
 /**
  * Builds the MCP server and registers every source's toolset.
@@ -26,6 +28,8 @@ export function createServer(env: Env): McpServer {
         "issuers. Share codes are required for price lookups — resolve a company name with " +
         "gse_search_company first. `bog_*` covers Bank of Ghana treasury data: interbank FX " +
         "rates, Treasury and central-bank bill rates, and interbank money-market rates. " +
+        "`imf_*` covers IMF macroeconomic indicators for Ghana — resolve a name to a code with " +
+        "imf_list_indicators first, and always flag IMF's own forward projections as such. " +
         "Every result carries a `meta.origin` field; when it is `stale-cache` or " +
         "`static-seed`, tell the user the data may be behind.",
     },
@@ -62,6 +66,12 @@ export function createServer(env: Env): McpServer {
 
   registerBogTools(server, {
     client: new BogClient({ timeoutMs: 15_000, retries: 2, logger }),
+    cache,
+    logger,
+  });
+
+  registerImfTools(server, {
+    client: new ImfClient({ timeoutMs: 15_000, retries: 2, logger }),
     cache,
     logger,
   });

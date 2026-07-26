@@ -4,12 +4,13 @@
 [![Upstream canary](https://github.com/epigos/ghana-data-mcp/actions/workflows/upstream-canary.yml/badge.svg)](https://github.com/epigos/ghana-data-mcp/actions/workflows/upstream-canary.yml)
 
 An MCP server that gives AI tools access to public Ghana data — share prices from the
-Ghana Stock Exchange and treasury data from the Bank of Ghana. It runs on Cloudflare
-Workers as a remote MCP server over Streamable HTTP.
+Ghana Stock Exchange, treasury data from the Bank of Ghana, and macroeconomic
+indicators from the IMF. It runs on Cloudflare Workers as a remote MCP server over
+Streamable HTTP.
 
 ## Tools
 
-Nine tools, all read-only, namespaced by source.
+Eleven tools, all read-only, namespaced by source.
 
 **Ghana Stock Exchange** — [full reference and sample queries](docs/GSE.md)
 
@@ -30,6 +31,13 @@ Nine tools, all read-only, namespaced by source.
 | [`bog_get_central_bank_bill_rates`](docs/BOG.md#bog_get_treasury_bill_rates-and-bog_get_central_bank_bill_rates) | The Bank of Ghana's own bill rates, back to 2016 |
 | [`bog_get_interbank_interest_rates`](docs/BOG.md#bog_get_interbank_interest_rates) | Interbank weighted average, reverse repo and depo rates, back to 2002 |
 
+**IMF** — [full reference and sample queries](docs/IMF.md)
+
+| Tool | Returns |
+| ---- | ------- |
+| [`imf_list_indicators`](docs/IMF.md#imf_list_indicators) | Search ~130 macroeconomic indicators by keyword; returns the code each needs |
+| [`imf_get_indicator_history`](docs/IMF.md#imf_get_indicator_history) | Ghana's time series for one or more indicators — GDP, inflation, debt, and more |
+
 Plus `ping` — no input, returns `{ ok, server, version }`. It belongs to no source and
 touches nothing upstream, which makes it a clean connectivity check.
 
@@ -41,18 +49,16 @@ Every result carries a `meta` block:
 { "origin": "live", "ageSeconds": 0, "skippedRows": 0 }
 ```
 
-| `origin` | Means |
-| -------- | ----- |
-| `live` | Just fetched from the source site |
-| `cache` | A fresh cached copy; `ageSeconds` says how old |
-| `stale-cache` | The fetch failed, so an expired copy was served |
-| `static-seed` | The fetch failed entirely and a built-in fallback list was used |
+| `origin`      | Means                                                                 |
+| ------------- | ---------------------------------------------------------------------- |
+| `live`        | Just fetched from the source site                                     |
+| `cache`       | A fresh cached copy; `ageSeconds` says how old                        |
+| `stale-cache` | The fetch failed, so an expired copy was served                       |
+| `static-seed` | The fetch failed entirely and a built-in fallback list was used       |
 
 `stale-cache` and `static-seed` always set `meta.warning`. Nothing is ever presented as
-fresh when it isn't.
-
-Each source's guide lists which origins its tools can return and how long each stays
-fresh.
+fresh when it isn't. Each source's guide lists which origins its tools can return and
+how long each stays fresh.
 
 ## Quick start
 
@@ -113,9 +119,11 @@ Then something real:
 
 > What is the current 91-day Treasury bill rate in Ghana?
 
+> What has the IMF forecast for Ghana's GDP growth next year?
+
 Each source's guide has a fuller set, chosen to exercise its tools and the awkward parts
 of its data — [GSE](docs/GSE.md#sample-chat-queries),
-[Bank of Ghana](docs/BOG.md#sample-chat-queries).
+[Bank of Ghana](docs/BOG.md#sample-chat-queries), [IMF](docs/IMF.md#sample-chat-queries).
 
 ## Deploying
 
@@ -141,7 +149,7 @@ time stays low.
 ## How it works
 
 ```
-MCP client ──► Worker /mcp ──► sources/{gse,bog} ──► lib/{http,cache,rateLimit} ──► source site
+MCP client ──► Worker /mcp ──► sources/{gse,bog,imf} ──► lib/{http,cache,rateLimit} ──► source site
                                                             │
                                                        Workers KV
 ```
@@ -170,33 +178,6 @@ naming what is missing.
 
 Per-source cache keys and TTLs are documented with the source.
 
-### Logging
-
-Every outbound request is logged, because `lib/http.ts` is the single choke point for
-network traffic — no source can reach the internet unobserved. Workers routes `console.*`
-into Workers Logs, so there is nothing to configure.
-
-- **`info` and above are always on.** One line per upstream request is cheap, since the
-  cache absorbs the repeats.
-- **`debug` needs `DEBUG = "1"`** in `wrangler.toml` — request bodies, nonces, cache keys,
-  retry delays.
-
-A cache hit is visible by its absence of HTTP lines:
-
-```
-info  | tool: gse_get_stock_history | source=gse symbol=GCB days=14
-info  | http: response | source=gse method=GET label="GET /trading-and-data/" status=200 ms=897
-info  | gse: table fetched | source=gse table=39 rows=10 recordsTotal=183595
-info  | tool: gse_get_stock_history done | source=gse rows=10 origin=live ageSeconds=0
-
-info  | tool: gse_get_stock_history | source=gse symbol=GCB days=14
-info  | tool: gse_get_stock_history done | source=gse rows=10 origin=cache ageSeconds=0
-```
-
-Every line carries its `source`, so the two stay greppable apart. Cookies are never
-logged — a session cookie would be a liability in a log aggregator, so the request line
-records only `cookies=yes|no`.
-
 ### Being a good citizen upstream
 
 - A descriptive `User-Agent` naming the project, linking to this repo.
@@ -210,7 +191,7 @@ records only `cookies=yes|no`.
 ```bash
 npm test          # unit tests, no network
 npm run typecheck
-npm run test:live # optional: hits gse.com.gh to catch upstream changes
+npm run test:live # optional: hits gse.com.gh and the IMF API to catch upstream changes
 ```
 
 The unit tests run against saved fixtures in `test/fixtures/`, so CI never depends on a
@@ -222,10 +203,12 @@ by default.
 | Workflow | Trigger | Does |
 | -------- | ------- | ---- |
 | [`ci.yml`](.github/workflows/ci.yml) | push to `main`, PRs, manual | Typecheck + unit tests on Node 22 and 24, plus a `wrangler deploy --dry-run` bundle check |
-| [`upstream-canary.yml`](.github/workflows/upstream-canary.yml) | 16:30 UTC Mon & Thu, manual | The live tests against gse.com.gh |
+| [`upstream-canary.yml`](.github/workflows/upstream-canary.yml) | 16:30 UTC Mon & Thu, manual | The live tests against gse.com.gh and the IMF DataMapper API |
 
 The split is the point: CI stays green or red on **our** code, never on whether a source
 site happens to be up. Neither workflow needs a secret.
+
+BoG's live tests run separately, via `npm run test:live:bog`.
 
 ## License
 

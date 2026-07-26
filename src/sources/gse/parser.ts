@@ -1,6 +1,7 @@
 import { parseHTML } from "linkedom";
 
 import { ParseError, UpstreamError } from "../../lib/errors.js";
+import { stripHtml } from "../../lib/text.js";
 import type {
   Company,
   FixedIncomeIssuer,
@@ -147,17 +148,13 @@ export function extractNonces(html: string, tableIds: readonly number[]): Record
 }
 
 /**
- * Strips tags from a cell's contents. wpDataTables renders the company Symbol
- * column as a link — `<a href='ACCESS' ...>ACCESS</a>` — so the raw cell is
- * markup rather than the plain share code.
+ * wpDataTables renders the company Symbol column as a link —
+ * `<a href='ACCESS' ...>ACCESS</a>` — so the raw cell is markup rather than the
+ * plain share code. `stripHtml` itself lives in lib/text.ts, shared with BoG and
+ * IMF, which need the same cleanup on their own messy cells and labels. Re-exported
+ * here since it is part of this module's established public surface.
  */
-export function stripHtml(value: unknown): string {
-  if (typeof value !== "string") return "";
-  return value
-    .replace(/<[^>]*>/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+export { stripHtml };
 
 /**
  * Parses a GSE-formatted number: thousands separators stripped, leading `+`
