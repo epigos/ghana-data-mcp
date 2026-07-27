@@ -1,0 +1,1334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ghana-data-mcp — public Ghana market data for AI tools</title>
+<meta name="description" content="An MCP server exposing public Ghana data — Ghana Stock Exchange, Bank of Ghana, and IMF macroeconomic indicators — to Claude, ChatGPT, Cursor, and any other MCP client.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>%F0%9F%87%AC%F0%9F%87%AD</text></svg>">
+<style>
+  :root {
+    --paper: #F2F5EC;
+    --paper-dim: #E6EBDA;
+    --paper-line: #DCE2CD;
+    --ink: #1A1D17;
+    --ink-soft: #52584A;
+    --ink-faint: #7B8070;
+    --rule: rgba(26, 29, 23, 0.20);
+    --rule-strong: rgba(26, 29, 23, 0.42);
+    --gold: #A9781E;
+    --gold-ink: #7A5714;
+    --gold-wash: rgba(169, 120, 30, 0.12);
+    --brick: #93392A;
+    --forest: #386249;
+    --shadow: rgba(26, 29, 23, 0.10);
+    --code-bg: #E9EEDD;
+
+    --font-display: "Bodoni 72", "Bodoni MT", Didot, "Playfair Display", Georgia, serif;
+    --font-body: Seravek, "Gill Sans", "Gill Sans MT", Calibri, "Segoe UI", sans-serif;
+    --font-mono: "SF Mono", ui-monospace, Menlo, Consolas, "Liberation Mono", monospace;
+
+    color-scheme: light;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #13161C;
+      --paper-dim: #191D24;
+      --paper-line: #262B33;
+      --ink: #ECE8DC;
+      --ink-soft: #B2AE9F;
+      --ink-faint: #7E8071;
+      --rule: rgba(236, 232, 220, 0.20);
+      --rule-strong: rgba(236, 232, 220, 0.38);
+      --gold: #D6A94D;
+      --gold-ink: #E7C078;
+      --gold-wash: rgba(214, 169, 77, 0.14);
+      --brick: #C2705D;
+      --forest: #6BA087;
+      --shadow: rgba(0, 0, 0, 0.45);
+      --code-bg: #1B2027;
+      color-scheme: dark;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper: #13161C;
+    --paper-dim: #191D24;
+    --paper-line: #262B33;
+    --ink: #ECE8DC;
+    --ink-soft: #B2AE9F;
+    --ink-faint: #7E8071;
+    --rule: rgba(236, 232, 220, 0.20);
+    --rule-strong: rgba(236, 232, 220, 0.38);
+    --gold: #D6A94D;
+    --gold-ink: #E7C078;
+    --gold-wash: rgba(214, 169, 77, 0.14);
+    --brick: #C2705D;
+    --forest: #6BA087;
+    --shadow: rgba(0, 0, 0, 0.45);
+    --code-bg: #1B2027;
+    color-scheme: dark;
+  }
+
+  :root[data-theme="light"] {
+    --paper: #F2F5EC;
+    --paper-dim: #E6EBDA;
+    --paper-line: #DCE2CD;
+    --ink: #1A1D17;
+    --ink-soft: #52584A;
+    --ink-faint: #7B8070;
+    --rule: rgba(26, 29, 23, 0.20);
+    --rule-strong: rgba(26, 29, 23, 0.42);
+    --gold: #A9781E;
+    --gold-ink: #7A5714;
+    --gold-wash: rgba(169, 120, 30, 0.12);
+    --brick: #93392A;
+    --forest: #386249;
+    --shadow: rgba(26, 29, 23, 0.10);
+    --code-bg: #E9EEDD;
+    color-scheme: light;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+  }
+
+  body {
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--gold-ink); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    text-wrap: balance;
+    margin: 0;
+  }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .num { font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    padding: 1.1rem clamp(1.25rem, 4vw, 3rem);
+    border-bottom: 1px solid var(--rule);
+    flex-wrap: wrap;
+  }
+
+  .wordmark {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+  }
+
+  .wordmark .mark {
+    font-family: var(--font-display);
+    font-size: 1.35rem;
+    font-weight: 700;
+  }
+
+  .wordmark .mark em {
+    font-style: normal;
+    color: var(--gold-ink);
+  }
+
+  .wordmark .tag {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--ink-faint);
+    letter-spacing: 0.06em;
+  }
+
+  .masthead nav {
+    display: flex;
+    gap: 1.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.03em;
+  }
+
+  .masthead nav a { color: var(--ink-soft); }
+  .masthead nav a:hover { color: var(--gold-ink); }
+
+  /* ---------- ticker ---------- */
+
+  .ticker-wrap {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--rule);
+    background: var(--paper-dim);
+  }
+
+  .ticker-label {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    padding: 0 1rem;
+    border-right: 1px solid var(--rule);
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    color: var(--ink-faint);
+    white-space: nowrap;
+  }
+
+  .ticker-viewport {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .ticker-track {
+    display: flex;
+    width: max-content;
+    animation: ticker 38s linear infinite;
+    padding: 0.65rem 0;
+  }
+
+  .ticker-track span {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    white-space: nowrap;
+    padding: 0 1.4rem;
+    border-right: 1px solid var(--rule);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ticker-track .up { color: var(--forest); }
+  .ticker-track .down { color: var(--brick); }
+
+  @keyframes ticker {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+
+  .ticker-wrap:hover .ticker-track { animation-play-state: paused; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ticker-track { animation: none; }
+    .ticker-viewport { overflow-x: auto; }
+  }
+
+  /* ---------- shared section rhythm ---------- */
+
+  section {
+    padding: clamp(2.75rem, 6vw, 4.5rem) clamp(1.25rem, 4vw, 3rem);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .section-head {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: 46rem;
+    margin-bottom: 2.25rem;
+  }
+
+  .section-head h2 { font-size: clamp(1.5rem, 2.4vw, 2rem); }
+  .section-head p { color: var(--ink-soft); margin: 0; max-width: 40rem; }
+
+  .rule-frame {
+    border-top: 3px double var(--rule-strong);
+    border-bottom: 1px solid var(--rule);
+    padding: 1.75rem 0;
+  }
+
+  /* ---------- hero ---------- */
+
+  .hero {
+    padding-top: clamp(3rem, 7vw, 5rem);
+    padding-bottom: clamp(3rem, 7vw, 4rem);
+  }
+
+  .hero-inner {
+    max-width: 62rem;
+    margin: 0 auto;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.6rem;
+  }
+
+  .hero h1 {
+    font-size: clamp(2.3rem, 5.2vw, 3.6rem);
+    line-height: 1.08;
+  }
+
+  .hero h1 .accent { color: var(--gold-ink); }
+
+  .hero .lede {
+    font-size: clamp(1.02rem, 1.6vw, 1.2rem);
+    color: var(--ink-soft);
+    max-width: 40rem;
+  }
+
+  .hero .cta-row {
+    display: flex;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-top: 0.5rem;
+  }
+
+  .btn {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    letter-spacing: 0.02em;
+    padding: 0.7rem 1.3rem;
+    border-radius: 3px;
+    border: 1px solid var(--rule-strong);
+    background: transparent;
+    color: var(--ink);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .btn.primary {
+    background: var(--gold);
+    border-color: var(--gold);
+    color: #1A1204;
+    font-weight: 600;
+  }
+
+  .btn.primary:hover { background: var(--gold-ink); border-color: var(--gold-ink); }
+  .btn:not(.primary):hover { border-color: var(--gold); color: var(--gold-ink); }
+
+  /* ---------- stat strip ---------- */
+
+  .stats {
+    border-bottom: 1px solid var(--rule);
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    border-top: 1px solid var(--rule);
+  }
+
+  .stat {
+    padding: 1.6rem clamp(1.25rem, 4vw, 3rem);
+    border-right: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .stat:last-child { border-right: none; }
+
+  .stat .value {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat .label {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-top: 0.2rem;
+  }
+
+  /* ---------- tools ledger ---------- */
+
+  .ledger-group {
+    margin-bottom: 2.5rem;
+  }
+
+  .ledger-group:last-child { margin-bottom: 0; }
+
+  .ledger-group-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    padding-bottom: 0.55rem;
+    border-bottom: 1px solid var(--rule-strong);
+    margin-bottom: 0.15rem;
+  }
+
+  .source-tag {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    padding: 0.2rem 0.5rem;
+    border-radius: 2px;
+    color: #1A1204;
+  }
+
+  .source-tag.gse { background: var(--gold); }
+  .source-tag.bog { background: var(--forest); color: #08150E; }
+  .source-tag.imf { background: var(--brick); color: #1A0908; }
+
+  .ledger-group-head h3 {
+    font-size: 1.05rem;
+    font-family: var(--font-body);
+    font-weight: 700;
+  }
+
+  .ledger-group-head .src-note {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--ink-faint);
+  }
+
+  .ledger-row {
+    display: grid;
+    grid-template-columns: minmax(13rem, 22rem) 1fr;
+    gap: 1.5rem;
+    padding: 0.85rem 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .ledger-row:hover { background: var(--gold-wash); }
+
+  .ledger-row code {
+    font-family: var(--font-mono);
+    font-size: 0.88rem;
+    color: var(--ink);
+  }
+
+  .ledger-row .returns {
+    color: var(--ink-soft);
+    font-size: 0.92rem;
+  }
+
+  .ping-row {
+    display: flex;
+    gap: 0.75rem;
+    align-items: baseline;
+    padding-top: 1.1rem;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--ink-faint);
+  }
+
+  /* ---------- provenance stamps ---------- */
+
+  .stamp-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .stamp {
+    background: var(--paper);
+    padding: 1.1rem 1.3rem;
+  }
+
+  .stamp .tag {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
+
+  .stamp.live .tag { color: var(--forest); }
+  .stamp.cache .tag { color: var(--gold-ink); }
+  .stamp.stale .tag { color: var(--brick); }
+  .stamp.seed .tag { color: var(--ink-faint); }
+
+  .stamp p {
+    margin: 0.35rem 0 0;
+    font-size: 0.86rem;
+    color: var(--ink-soft);
+  }
+
+  /* ---------- setup ---------- */
+
+  .setup-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 2.5rem;
+  }
+
+  @media (max-width: 860px) {
+    .setup-grid { grid-template-columns: 1fr; }
+  }
+
+  .steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    counter-reset: step;
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+  }
+
+  .steps li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 1.8rem 1fr;
+    gap: 0.8rem;
+  }
+
+  .steps li::before {
+    content: counter(step);
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    color: var(--gold-ink);
+    border: 1px solid var(--rule-strong);
+    border-radius: 50%;
+    width: 1.8rem;
+    height: 1.8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .steps .step-body p { margin: 0.2rem 0 0; color: var(--ink-soft); font-size: 0.92rem; }
+  .steps .step-body strong { font-size: 0.98rem; }
+
+  pre, .codeblock {
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 1rem 1.15rem;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    line-height: 1.65;
+    margin: 0;
+  }
+
+  .codeblock .comment { color: var(--ink-faint); }
+  .codeblock .prompt { color: var(--gold-ink); }
+
+  .setup-col h3 {
+    font-size: 1rem;
+    font-family: var(--font-body);
+    font-weight: 700;
+    margin-bottom: 0.9rem;
+  }
+
+  .setup-col + .setup-col { margin-top: 2rem; }
+
+  /* ---------- hosted server / client tabs ---------- */
+
+  .local-setup { margin-top: 2.75rem; }
+
+  .setup-subhead {
+    font-size: 1.15rem;
+    font-family: var(--font-display);
+    font-weight: 700;
+    margin-bottom: 0.6rem;
+  }
+
+  .local-setup .setup-grid { margin-top: 1.5rem; }
+
+  .hosted-lede { color: var(--ink-soft); margin: 0 0 1.1rem; font-size: 0.94rem; }
+  .hosted-lede code {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    background: var(--code-bg);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+  }
+
+  pre.url-line {
+    text-align: center;
+    font-size: 0.98rem;
+    color: var(--gold-ink);
+    margin-bottom: 1.6rem;
+  }
+
+  .client-switch {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: flex-start;
+    position: relative;
+  }
+
+  .tab-radio {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .tab-label {
+    cursor: pointer;
+    padding: 0.6rem 1rem;
+    border: 1px solid var(--rule);
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.03em;
+    color: var(--ink-faint);
+    background: var(--paper);
+    transition: background 0.15s ease, color 0.15s ease;
+    user-select: none;
+  }
+
+  .tab-label:hover { color: var(--ink); }
+
+  .tab-radio:focus-visible + .tab-label {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
+  }
+
+  .tab-panel {
+    display: none;
+    flex-basis: 100%;
+    border: 1px solid var(--rule);
+    border-radius: 0 6px 6px 6px;
+    padding: 1.4rem 1.6rem;
+    background: var(--paper-dim);
+    margin-top: -1px;
+  }
+
+  .tab-panel > p:first-child { margin-top: 0; color: var(--ink-soft); font-size: 0.9rem; }
+  .tab-panel pre { margin-top: 0.6rem; }
+  .tab-footnote { color: var(--ink-faint); font-size: 0.82rem; margin: 0.7rem 0 0; }
+
+  .mini-steps {
+    margin: 0.6rem 0 0;
+    padding-left: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--ink-soft);
+  }
+
+  .mini-steps li::marker {
+    color: var(--gold-ink);
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+  }
+
+  .mini-steps strong { color: var(--ink); }
+  .mini-steps code {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    background: var(--code-bg);
+    padding: 0.05rem 0.3rem;
+    border-radius: 3px;
+  }
+
+  #ct-code:checked ~ #panel-code,
+  #ct-desktop:checked ~ #panel-desktop,
+  #ct-web:checked ~ #panel-web,
+  #ct-chatgpt:checked ~ #panel-chatgpt,
+  #ct-cursor:checked ~ #panel-cursor,
+  #ct-other:checked ~ #panel-other {
+    display: block;
+  }
+
+  #ct-code:checked ~ label[for="ct-code"],
+  #ct-desktop:checked ~ label[for="ct-desktop"],
+  #ct-web:checked ~ label[for="ct-web"],
+  #ct-chatgpt:checked ~ label[for="ct-chatgpt"],
+  #ct-cursor:checked ~ label[for="ct-cursor"],
+  #ct-other:checked ~ label[for="ct-other"] {
+    background: var(--gold-wash);
+    color: var(--ink);
+    border-color: var(--rule-strong);
+    font-weight: 700;
+  }
+
+  /* ---------- use cases ---------- */
+
+  .usecase-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15.5rem, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+
+  .usecase {
+    background: var(--paper);
+    padding: 1.6rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .usecase .glyph {
+    font-family: var(--font-display);
+    font-size: 1.6rem;
+    color: var(--gold-ink);
+  }
+
+  .usecase h3 {
+    font-size: 1.02rem;
+    font-family: var(--font-body);
+    font-weight: 700;
+  }
+
+  .usecase p { margin: 0; color: var(--ink-soft); font-size: 0.9rem; }
+
+  .usecase .tools-used {
+    margin-top: auto;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--ink-faint);
+    letter-spacing: 0.02em;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--rule);
+  }
+
+  /* ---------- chat scenarios ---------- */
+
+  .transcript-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+    gap: 1.4rem;
+  }
+
+  .transcript {
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--paper-dim);
+  }
+
+  .transcript .bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 0.9rem;
+    border-bottom: 1px solid var(--rule);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+  }
+
+  .transcript .bar .dot {
+    width: 0.5rem; height: 0.5rem; border-radius: 50%;
+    background: var(--rule-strong);
+  }
+
+  .transcript .msg {
+    padding: 0.9rem 1rem;
+    font-size: 0.9rem;
+  }
+
+  .transcript .msg.q {
+    color: var(--ink);
+    font-weight: 600;
+    border-bottom: 1px dashed var(--rule);
+  }
+
+  .transcript .msg.a {
+    color: var(--ink-soft);
+    display: flex;
+    gap: 0.6rem;
+  }
+
+  .transcript .msg.a .tool {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    color: var(--gold-ink);
+    background: var(--gold-wash);
+    padding: 0.1rem 0.4rem;
+    border-radius: 2px;
+    height: fit-content;
+  }
+
+  /* ---------- architecture ---------- */
+
+  .flow {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    padding: 1.5rem 0;
+  }
+
+  .flow .node {
+    border: 1px solid var(--rule-strong);
+    padding: 0.55rem 0.9rem;
+    border-radius: 3px;
+    background: var(--paper-dim);
+  }
+
+  .flow .step {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  .flow .arrow { color: var(--ink-faint); }
+
+  .arch-note {
+    color: var(--ink-soft);
+    max-width: 44rem;
+    font-size: 0.92rem;
+    margin-top: 1.25rem;
+  }
+
+  /* ---------- footer / colophon ---------- */
+
+  .colophon {
+    padding: 2.5rem clamp(1.25rem, 4vw, 3rem) 3rem;
+    display: flex;
+    justify-content: space-between;
+    gap: 2rem;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+    color: var(--ink-soft);
+  }
+
+  .colophon .block { max-width: 24rem; }
+  .colophon .block + .block { text-align: right; }
+  @media (max-width: 640px) {
+    .colophon .block + .block { text-align: left; }
+  }
+
+  .colophon strong { color: var(--ink); font-family: var(--font-display); font-size: 1rem; }
+
+  .colophon .meta-line {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--ink-faint);
+    margin-top: 0.4rem;
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="wordmark">
+      <span class="mark">ghana<em>-data</em>-mcp</span>
+      <span class="tag">MCP SERVER · CLOUDFLARE WORKERS</span>
+    </div>
+    <nav>
+      <a href="#tools">Tools</a>
+      <a href="#setup">Setup</a>
+      <a href="#use-cases">Use cases</a>
+      <a href="#scenarios">Chat scenarios</a>
+      <a href="https://github.com/epigos/ghana-data-mcp">GitHub ↗</a>
+    </nav>
+  </header>
+
+  <div class="ticker-wrap" aria-hidden="true">
+    <div class="ticker-label">SAMPLE — NOT LIVE</div>
+    <div class="ticker-viewport">
+      <div class="ticker-track">
+        <span>MTN <span class="num">GH₵2.35</span> <span class="up">▲0.04</span></span>
+        <span>GCB <span class="num">GH₵5.10</span> <span class="down">▼0.02</span></span>
+        <span>USD/GHS <span class="num">15.42</span></span>
+        <span>EUR/GHS <span class="num">16.78</span></span>
+        <span>91D T-BILL <span class="num">27.83%</span></span>
+        <span>182D T-BILL <span class="num">28.10%</span></span>
+        <span>GSE-CI <span class="num">6,842.15</span></span>
+        <span>GHANA GDP GROWTH (2027E) <span class="num">4.9%</span></span>
+        <span>MTN <span class="num">GH₵2.35</span> <span class="up">▲0.04</span></span>
+        <span>GCB <span class="num">GH₵5.10</span> <span class="down">▼0.02</span></span>
+        <span>USD/GHS <span class="num">15.42</span></span>
+        <span>EUR/GHS <span class="num">16.78</span></span>
+        <span>91D T-BILL <span class="num">27.83%</span></span>
+        <span>182D T-BILL <span class="num">28.10%</span></span>
+        <span>GSE-CI <span class="num">6,842.15</span></span>
+        <span>GHANA GDP GROWTH (2027E) <span class="num">4.9%</span></span>
+      </div>
+    </div>
+  </div>
+
+  <main>
+
+    <section class="hero">
+      <div class="hero-inner">
+        <p class="eyebrow">A REMOTE MCP SERVER, STREAMABLE HTTP, NO API KEY</p>
+        <h1>Public Ghana market data,<br>wired straight into your <span class="accent">AI tools</span>.</h1>
+        <p class="lede">
+          Eleven read-only tools bring the Ghana Stock Exchange, the Bank of Ghana, and the
+          IMF's macroeconomic indicators to any MCP client — Claude, or anything else that
+          speaks the protocol. No scraping in your prompt, no stale copy-paste from a PDF.
+        </p>
+        <div class="cta-row">
+          <a class="btn primary" href="#setup">Connect a client →</a>
+          <a class="btn" href="#tools">Browse the eleven tools</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="stats">
+      <div class="stat-grid">
+        <div class="stat">
+          <div class="value num">11</div>
+          <div class="label">Read-only tools</div>
+        </div>
+        <div class="stat">
+          <div class="value num">3</div>
+          <div class="label">Data sources</div>
+        </div>
+        <div class="stat">
+          <div class="value num">1996</div>
+          <div class="label">FX history begins</div>
+        </div>
+        <div class="stat">
+          <div class="value num">~130</div>
+          <div class="label">IMF indicators</div>
+        </div>
+        <div class="stat">
+          <div class="value num">0</div>
+          <div class="label">API keys required</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tools">
+      <div class="section-head">
+        <p class="eyebrow">THE LEDGER</p>
+        <h2>Eleven tools, three sources</h2>
+        <p>Every tool is read-only and namespaced by where its data comes from. Full parameter
+          reference lives in the repo's <code>docs/</code> folder, linked from each row.</p>
+      </div>
+
+      <div class="ledger-group">
+        <div class="ledger-group-head">
+          <span class="source-tag gse">GSE</span>
+          <h3>Ghana Stock Exchange</h3>
+          <span class="src-note">gse.com.gh</span>
+        </div>
+        <div class="ledger-row">
+          <code>gse_get_stock_history</code>
+          <span class="returns">Daily prices and volume for one share code, back to 2007</span>
+        </div>
+        <div class="ledger-row">
+          <code>gse_list_companies</code>
+          <span class="returns">Every listed company: share code, name, board, listing date</span>
+        </div>
+        <div class="ledger-row">
+          <code>gse_search_company</code>
+          <span class="returns">Best-matching companies for a name, with a confidence score</span>
+        </div>
+        <div class="ledger-row">
+          <code>gse_get_market_index</code>
+          <span class="returns">Market-wide GSE Composite Index, market cap, GSE-FSI, volume</span>
+        </div>
+        <div class="ledger-row">
+          <code>gse_list_fixed_income_issuers</code>
+          <span class="returns">Corporate bond issuers on the Ghana Fixed Income Market</span>
+        </div>
+      </div>
+
+      <div class="ledger-group">
+        <div class="ledger-group-head">
+          <span class="source-tag bog">BOG</span>
+          <h3>Bank of Ghana</h3>
+          <span class="src-note">bog.gov.gh</span>
+        </div>
+        <div class="ledger-row">
+          <code>bog_get_interbank_fx_rates</code>
+          <span class="returns">Cedi reference rates against 19 currencies — latest day, or history to 1996</span>
+        </div>
+        <div class="ledger-row">
+          <code>bog_get_treasury_bill_rates</code>
+          <span class="returns">Government of Ghana bill, note and bond rates, back to 2013</span>
+        </div>
+        <div class="ledger-row">
+          <code>bog_get_central_bank_bill_rates</code>
+          <span class="returns">The Bank of Ghana's own bill rates, back to 2016</span>
+        </div>
+        <div class="ledger-row">
+          <code>bog_get_interbank_interest_rates</code>
+          <span class="returns">Interbank weighted average, reverse repo and depo rates, back to 2002</span>
+        </div>
+      </div>
+
+      <div class="ledger-group">
+        <div class="ledger-group-head">
+          <span class="source-tag imf">IMF</span>
+          <h3>International Monetary Fund</h3>
+          <span class="src-note">DataMapper API</span>
+        </div>
+        <div class="ledger-row">
+          <code>imf_list_indicators</code>
+          <span class="returns">Search ~130 macroeconomic indicators by keyword; returns the code each match needs</span>
+        </div>
+        <div class="ledger-row">
+          <code>imf_get_indicator_history</code>
+          <span class="returns">Time series for one or more indicators — GDP, inflation, debt, and more — for Ghana and, optionally, other countries, regions or analytical groups</span>
+        </div>
+      </div>
+
+      <div class="ping-row">
+        <code>ping</code>
+        <span>— no input, returns <code>{ ok, server, version }</code>. Belongs to no source; a clean connectivity check.</span>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <p class="eyebrow">DATA PROVENANCE</p>
+        <h2>Every answer says how fresh it is</h2>
+        <p>Nothing is ever presented as live when it isn't. Each result carries a <code>meta.origin</code>
+          stamp, so a model — and a reader — can tell the difference.</p>
+      </div>
+      <div class="stamp-row">
+        <div class="stamp live">
+          <div class="tag">LIVE</div>
+          <p>Just fetched from the source site, this request.</p>
+        </div>
+        <div class="stamp cache">
+          <div class="tag">CACHE</div>
+          <p>A fresh cached copy. <code>ageSeconds</code> says exactly how old.</p>
+        </div>
+        <div class="stamp stale">
+          <div class="tag">STALE-CACHE</div>
+          <p>The live fetch failed, so an expired copy was served — flagged with a warning.</p>
+        </div>
+        <div class="stamp seed">
+          <div class="tag">STATIC-SEED</div>
+          <p>The fetch failed entirely; a built-in fallback list was used instead.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="setup">
+      <div class="section-head">
+        <p class="eyebrow">OPENING THE ACCOUNT</p>
+        <h2>Connect in one line, or run your own copy</h2>
+        <p>No secrets either way — the underlying data is public, so there's no key to
+          provision. Point a client at the hosted server below, or self-host in five
+          commands if you'd rather run your own copy.</p>
+      </div>
+
+      <div class="hosted-setup">
+        <h3 class="setup-subhead">Connect to the hosted server</h3>
+        <p class="hosted-lede">No clone, no install, nothing to run — every client below just needs
+          this one address:</p>
+        <pre class="url-line">https://ghana-data-mcp.epigos.workers.dev/mcp</pre>
+
+        <div class="client-switch">
+          <input type="radio" name="client-tab" id="ct-code" class="tab-radio" checked>
+          <label for="ct-code" class="tab-label">Claude Code</label>
+          <input type="radio" name="client-tab" id="ct-desktop" class="tab-radio">
+          <label for="ct-desktop" class="tab-label">Claude Desktop</label>
+          <input type="radio" name="client-tab" id="ct-web" class="tab-radio">
+          <label for="ct-web" class="tab-label">Claude.ai</label>
+          <input type="radio" name="client-tab" id="ct-chatgpt" class="tab-radio">
+          <label for="ct-chatgpt" class="tab-label">ChatGPT</label>
+          <input type="radio" name="client-tab" id="ct-cursor" class="tab-radio">
+          <label for="ct-cursor" class="tab-label">Cursor</label>
+          <input type="radio" name="client-tab" id="ct-other" class="tab-radio">
+          <label for="ct-other" class="tab-label">Other clients</label>
+
+          <div class="tab-panel" id="panel-code">
+            <p>Claude Code, one line:</p>
+            <pre>claude mcp add --transport http \
+  ghana-data https://ghana-data-mcp.epigos.workers.dev/mcp</pre>
+          </div>
+
+          <div class="tab-panel" id="panel-desktop">
+            <p>In <code>claude_desktop_config.json</code>:</p>
+            <pre>{
+  "mcpServers": {
+    "ghana-data": {
+      "type": "http",
+      "url": "https://ghana-data-mcp.epigos.workers.dev/mcp"
+    }
+  }
+}</pre>
+            <p class="tab-footnote">Restart Claude Desktop after saving.</p>
+          </div>
+
+          <div class="tab-panel" id="panel-web">
+            <p>Claude.ai and the Claude desktop app take remote servers as custom connectors:</p>
+            <ol class="mini-steps">
+              <li>Settings → Connectors → <strong>Add custom connector</strong></li>
+              <li>Paste <code>https://ghana-data-mcp.epigos.workers.dev/mcp</code> as the URL</li>
+              <li>Name it (e.g. "Ghana Data") and save — no authentication to configure</li>
+              <li>Enable it from the connector picker in a chat</li>
+            </ol>
+          </div>
+
+          <div class="tab-panel" id="panel-chatgpt">
+            <p>ChatGPT reaches remote MCP servers through Connectors (menu names shift between
+              plans, but the shape is the same):</p>
+            <ol class="mini-steps">
+              <li>Settings → Connectors → Advanced settings → enable <strong>Developer mode</strong></li>
+              <li><strong>Create connector</strong>, paste the URL above, authentication: <strong>None</strong></li>
+              <li>Enable the connector for the chat you want to use it in</li>
+            </ol>
+          </div>
+
+          <div class="tab-panel" id="panel-cursor">
+            <p>Add to <code>~/.cursor/mcp.json</code> (or a project's <code>.cursor/mcp.json</code>):</p>
+            <pre>{
+  "mcpServers": {
+    "ghana-data": {
+      "url": "https://ghana-data-mcp.epigos.workers.dev/mcp"
+    }
+  }
+}</pre>
+          </div>
+
+          <div class="tab-panel" id="panel-other">
+            <p>Anything that speaks Streamable HTTP can connect directly — point it at the URL
+              above, no auth header required. A plain health check needs no MCP client at all:</p>
+            <pre>curl https://ghana-data-mcp.epigos.workers.dev/health</pre>
+          </div>
+        </div>
+
+        <p class="hosted-lede" style="margin-top: 1.5rem;">Confirm the connection before asking
+          anything real: <code>Use the ping tool on the ghana-data server.</code></p>
+      </div>
+
+      <div class="local-setup">
+        <div class="rule-frame">
+          <h3 class="setup-subhead">...or run your own copy</h3>
+
+          <div class="setup-grid">
+            <div class="setup-col">
+              <h3>Run it locally</h3>
+              <ol class="steps">
+                <li>
+                  <div class="step-body">
+                    <strong>Clone and install</strong>
+                    <p>Pull the repo and its dependencies.</p>
+                  </div>
+                </li>
+                <li>
+                  <div class="step-body">
+                    <strong>Run the test suite</strong>
+                    <p>Fixture-based, no network — confirms the build is sound before you serve anything.</p>
+                  </div>
+                </li>
+                <li>
+                  <div class="step-body">
+                    <strong>Start the dev server</strong>
+                    <p>Serves MCP at <code>http://localhost:8787/mcp</code> via Wrangler.</p>
+                  </div>
+                </li>
+                <li>
+                  <div class="step-body">
+                    <strong>Point a client at it</strong>
+                    <p>Streamable HTTP, no authentication — see the snippets on the right.</p>
+                  </div>
+                </li>
+              </ol>
+              <pre style="margin-top: 1.3rem"><span class="comment"># one block, top to bottom</span>
+git clone git@github.com:epigos/ghana-data-mcp.git
+cd ghana-data-mcp
+npm install
+npm test
+npm run dev</pre>
+            </div>
+
+            <div class="setup-col">
+              <h3>Connect a client (local)</h3>
+              <p style="margin: 0 0 0.9rem; color: var(--ink-soft); font-size: 0.9rem;">Claude Code, one line:</p>
+              <pre>claude mcp add --transport http \
+  ghana-data http://localhost:8787/mcp</pre>
+
+              <div class="setup-col">
+                <p style="margin: 0 0 0.9rem; color: var(--ink-soft); font-size: 0.9rem;">Claude Desktop, in <code>claude_desktop_config.json</code>:</p>
+                <pre>{
+  "mcpServers": {
+    "ghana-data": {
+      "type": "http",
+      "url": "http://localhost:8787/mcp"
+    }
+  }
+}</pre>
+              </div>
+
+              <div class="setup-col">
+                <p style="margin: 0 0 0.9rem; color: var(--ink-soft); font-size: 0.9rem;">Confirm the connection before asking anything real:</p>
+                <pre><span class="prompt">&gt;</span> Use the ping tool on the ghana-data server.</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="use-cases">
+      <div class="section-head">
+        <p class="eyebrow">WHAT IT'S FOR</p>
+        <h2>Five things people actually build with it</h2>
+        <p>All read-only, all pointed at public sources — the tools compose across GSE, BoG
+          and IMF rather than staying siloed by source.</p>
+      </div>
+      <div class="usecase-grid">
+        <div class="usecase">
+          <div class="glyph">§</div>
+          <h3>Equity research copilot</h3>
+          <p>Look up a share by name, pull its full price history, and read it alongside the
+            GSE Composite Index for context — without a ticker cheat-sheet.</p>
+          <div class="tools-used">gse_search_company · gse_get_stock_history · gse_get_market_index</div>
+        </div>
+        <div class="usecase">
+          <div class="glyph">₵</div>
+          <h3>FX &amp; rates desk assistant</h3>
+          <p>Cedi reference rates against 19 currencies plus T-bill, central-bank-bill and
+            interbank rates, for a daily treasury briefing bot.</p>
+          <div class="tools-used">bog_get_interbank_fx_rates · bog_get_treasury_bill_rates</div>
+        </div>
+        <div class="usecase">
+          <div class="glyph">%</div>
+          <h3>Macro briefing generator</h3>
+          <p>GDP growth, inflation, government debt — each row flagged as historical actual
+            or IMF's own forward projection, never blurred together.</p>
+          <div class="tools-used">imf_list_indicators · imf_get_indicator_history</div>
+        </div>
+        <div class="usecase">
+          <div class="glyph">⇄</div>
+          <h3>West Africa comparison</h3>
+          <p>Benchmark Ghana against a named neighbor or a whole bloc — Nigeria, Senegal,
+            ECOWAS, Sub-Saharan Africa — on the same indicator, same call.</p>
+          <div class="tools-used">imf_get_indicator_history({ countries: [...] })</div>
+        </div>
+        <div class="usecase">
+          <div class="glyph">◈</div>
+          <h3>Fixed-income screening</h3>
+          <p>Cross-reference corporate bond issuers on the Fixed Income Market against
+            prevailing benchmark rates from the Bank of Ghana.</p>
+          <div class="tools-used">gse_list_fixed_income_issuers · bog_get_central_bank_bill_rates</div>
+        </div>
+        <div class="usecase">
+          <div class="glyph">✓</div>
+          <h3>Freshness-aware reporting</h3>
+          <p>Every figure carries <code>meta.origin</code> — build a dashboard that visibly
+            distinguishes live numbers from a stale fallback, rather than hiding the gap.</p>
+          <div class="tools-used">meta.origin · meta.ageSeconds · meta.warning</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="scenarios">
+      <div class="section-head">
+        <p class="eyebrow">SAY IT IN CHAT</p>
+        <h2>What the questions actually look like</h2>
+        <p>No special syntax — a client with the server connected resolves these to the
+          right tool call on its own.</p>
+      </div>
+      <div class="transcript-grid">
+        <div class="transcript">
+          <div class="bar"><span class="dot"></span> Chat</div>
+          <div class="msg q">What has MTN Ghana's share price done this month?</div>
+          <div class="msg a"><span class="tool">gse</span><span class="text">Pulls MTNGH's daily history, reads the last few weeks, and describes the move — with the actual close prices, not a guess.</span></div>
+        </div>
+        <div class="transcript">
+          <div class="bar"><span class="dot"></span> Chat</div>
+          <div class="msg q">What is the cedi trading at against the dollar?</div>
+          <div class="msg a"><span class="tool">bog</span><span class="text">Reads today's USD/GHS reference rate, and says if it's a fresh fetch or a cached figure from earlier today.</span></div>
+        </div>
+        <div class="transcript">
+          <div class="bar"><span class="dot"></span> Chat</div>
+          <div class="msg q">What is the current 91-day Treasury bill rate?</div>
+          <div class="msg a"><span class="tool">bog</span><span class="text">Reads the latest published rate off the T-bill/note/bond schedule, not an average or an estimate.</span></div>
+        </div>
+        <div class="transcript">
+          <div class="bar"><span class="dot"></span> Chat</div>
+          <div class="msg q">What's the IMF's forecast for Ghana's GDP growth next year?</div>
+          <div class="msg a"><span class="tool">imf</span><span class="text">Reads the row past the projection boundary and says explicitly that it's a forecast, not a reported figure.</span></div>
+        </div>
+        <div class="transcript">
+          <div class="bar"><span class="dot"></span> Chat</div>
+          <div class="msg q">How does that compare to other West African economies?</div>
+          <div class="msg a"><span class="tool">imf</span><span class="text">Adds Nigeria, Senegal and ECOWAS to the same call, and checks each one's <code>rowCount</code> before comparing — a bloc-wide aggregate isn't always published for a given indicator.</span></div>
+        </div>
+        <div class="transcript">
+          <div class="bar"><span class="dot"></span> Chat</div>
+          <div class="msg q">Find me an indicator about government debt.</div>
+          <div class="msg a"><span class="tool">imf</span><span class="text">Searches the catalog by keyword and returns matches across datasets — WEO's headline figure and the Global Debt Database's, distinguished by description.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <p class="eyebrow">UNDER THE HOOD</p>
+        <h2>How a request actually travels</h2>
+      </div>
+      <div class="rule-frame">
+        <div class="flow">
+          <span class="node">MCP client</span>
+          <span class="step"><span class="arrow">──▶</span><span class="node">Worker /mcp</span></span>
+          <span class="step"><span class="arrow">──▶</span><span class="node">sources/{gse,bog,imf}</span></span>
+          <span class="step"><span class="arrow">──▶</span><span class="node">lib/{http,cache,rateLimit}</span></span>
+          <span class="step"><span class="arrow">──▶</span><span class="node">source site</span></span>
+        </div>
+        <p class="arch-note">
+          Runs on Cloudflare Workers with no Durable Object — every tool is an independent,
+          read-only fetch with no session state worth keeping. Repeat questions are served
+          from Workers KV before they ever reach a source site; a jittered backoff handles
+          the occasional 403 or 429; an inbound limit of 30 requests/minute per IP keeps a
+          looping client from becoming someone else's problem.
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="colophon">
+    <div class="block">
+      <strong>ghana-data-mcp</strong>
+      <p style="margin: 0.5rem 0 0;">
+        Developed by <a href="https://github.com/epigos">Philip Adzanoukpe</a> (epigos).
+        MIT licensed. Source and issues on
+        <a href="https://github.com/epigos/ghana-data-mcp">GitHub</a>.
+      </p>
+      <div class="meta-line">Model Context Protocol · Cloudflare Workers · Workers KV</div>
+    </div>
+    <div class="block">
+      <p style="margin: 0;">Data belongs to the Ghana Stock Exchange, the Bank of Ghana,<br>
+        and the International Monetary Fund. This project only relays it.</p>
+      <div class="meta-line">No API key. No tracking. No warranty of any kind.</div>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -103,7 +103,11 @@ claude mcp add --transport http ghana-data http://localhost:8787/mcp
 curl http://localhost:8787/health
 ```
 
-Swap `localhost:8787` for your `workers.dev` URL once [deployed](#deploying).
+Swap `localhost:8787` for your `workers.dev` URL once [deployed](#deploying) — or, for
+the hosted copy, use `https://ghana-data-mcp.epigos.workers.dev/mcp` directly, no setup
+required. The root URL itself (`/`) serves a landing page (tools, setup, sample chat
+queries) rather than JSON — that's `public/index.html`, served by Cloudflare's static
+assets, not the Worker code.
 
 ### Try it
 

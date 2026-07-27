@@ -6,6 +6,13 @@ compatibility_flags = ["nodejs_compat"]
 [observability]
 enabled = true
 
+# Landing page (tools, setup, use cases) at "/". No binding: Cloudflare serves a
+# matching static file directly, without invoking the Worker at all, and only
+# falls through to `fetch()` below for paths that aren't a static asset —
+# `/mcp` and `/health` included.
+[assets]
+directory = "public"
+
 # Cache for every source's scrapes (plan §7).
 # Created with: npx wrangler kv namespace create GSE_CACHE
 [[kv_namespaces]]

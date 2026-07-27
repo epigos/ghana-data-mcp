@@ -14,6 +14,11 @@ import { createServer } from "./server.js";
  * (and no DO class to deploy, migrate, or pay for). If a future tool needs
  * sessions or SSE resumability, `McpAgent` from the same package is the upgrade
  * path, and it is a drop-in swap here.
+ *
+ * `/` itself never reaches this handler: `public/index.html` (the project's
+ * landing page) is served directly by Cloudflare's static-assets routing per
+ * the `[assets]` block in wrangler.toml, which only falls through to `fetch()`
+ * for paths that aren't a static file.
  */
 
 const MCP_ROUTE = "/mcp";
@@ -22,7 +27,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === "/" || url.pathname === "/health") {
+    if (url.pathname === "/health") {
       return Response.json({
         ok: true,
         server: SERVER_NAME,
