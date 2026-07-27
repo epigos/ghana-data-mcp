@@ -92,6 +92,14 @@
 
   * { box-sizing: border-box; }
 
+  html {
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
+
   html, body {
     margin: 0;
     padding: 0;
@@ -181,66 +189,6 @@
 
   .masthead nav a { color: var(--ink-soft); }
   .masthead nav a:hover { color: var(--gold-ink); }
-
-  /* ---------- ticker ---------- */
-
-  .ticker-wrap {
-    display: flex;
-    align-items: stretch;
-    border-bottom: 1px solid var(--rule);
-    background: var(--paper-dim);
-  }
-
-  .ticker-label {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    padding: 0 1rem;
-    border-right: 1px solid var(--rule);
-    font-family: var(--font-mono);
-    font-size: 0.65rem;
-    letter-spacing: 0.1em;
-    color: var(--ink-faint);
-    white-space: nowrap;
-  }
-
-  .ticker-viewport {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    position: relative;
-  }
-
-  .ticker-track {
-    display: flex;
-    width: max-content;
-    animation: ticker 38s linear infinite;
-    padding: 0.65rem 0;
-  }
-
-  .ticker-track span {
-    font-family: var(--font-mono);
-    font-size: 0.82rem;
-    white-space: nowrap;
-    padding: 0 1.4rem;
-    border-right: 1px solid var(--rule);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .ticker-track .up { color: var(--forest); }
-  .ticker-track .down { color: var(--brick); }
-
-  @keyframes ticker {
-    from { transform: translateX(0); }
-    to { transform: translateX(-50%); }
-  }
-
-  .ticker-wrap:hover .ticker-track { animation-play-state: paused; }
-
-  @media (prefers-reduced-motion: reduce) {
-    .ticker-track { animation: none; }
-    .ticker-viewport { overflow-x: auto; }
-  }
 
   /* ---------- shared section rhythm ---------- */
 
@@ -857,30 +805,6 @@
       <a href="https://github.com/epigos/ghana-data-mcp">GitHub ↗</a>
     </nav>
   </header>
-
-  <div class="ticker-wrap" aria-hidden="true">
-    <div class="ticker-label">SAMPLE — NOT LIVE</div>
-    <div class="ticker-viewport">
-      <div class="ticker-track">
-        <span>MTN <span class="num">GH₵2.35</span> <span class="up">▲0.04</span></span>
-        <span>GCB <span class="num">GH₵5.10</span> <span class="down">▼0.02</span></span>
-        <span>USD/GHS <span class="num">15.42</span></span>
-        <span>EUR/GHS <span class="num">16.78</span></span>
-        <span>91D T-BILL <span class="num">27.83%</span></span>
-        <span>182D T-BILL <span class="num">28.10%</span></span>
-        <span>GSE-CI <span class="num">6,842.15</span></span>
-        <span>GHANA GDP GROWTH (2027E) <span class="num">4.9%</span></span>
-        <span>MTN <span class="num">GH₵2.35</span> <span class="up">▲0.04</span></span>
-        <span>GCB <span class="num">GH₵5.10</span> <span class="down">▼0.02</span></span>
-        <span>USD/GHS <span class="num">15.42</span></span>
-        <span>EUR/GHS <span class="num">16.78</span></span>
-        <span>91D T-BILL <span class="num">27.83%</span></span>
-        <span>182D T-BILL <span class="num">28.10%</span></span>
-        <span>GSE-CI <span class="num">6,842.15</span></span>
-        <span>GHANA GDP GROWTH (2027E) <span class="num">4.9%</span></span>
-      </div>
-    </div>
-  </div>
 
   <main>
 
