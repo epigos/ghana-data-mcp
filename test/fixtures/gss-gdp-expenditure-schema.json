@@ -1,0 +1,90 @@
+{
+ "title": "Annual GDP Expenditure Approach",
+ "variables": [
+  {
+   "code": "Year",
+   "text": "Year",
+   "values": [
+    "2025**",
+    "2024*",
+    "2023",
+    "2022",
+    "2021",
+    "2020",
+    "2019",
+    "2018",
+    "2017",
+    "2016",
+    "2015",
+    "2014",
+    "2013"
+   ],
+   "valueTexts": [
+    "2025**",
+    "2024*",
+    "2023",
+    "2022",
+    "2021",
+    "2020",
+    "2019",
+    "2018",
+    "2017",
+    "2016",
+    "2015",
+    "2014",
+    "2013"
+   ]
+  },
+  {
+   "code": "GDP_Series",
+   "text": "GDP_Series",
+   "values": [
+    "Nominal GDP (current prices)",
+    "Real GDP (constant 2013 prices)",
+    "Real GDP growth rate (year-on-year %)"
+   ],
+   "valueTexts": [
+    "Nominal GDP (current prices)",
+    "Real GDP (constant 2013 prices)",
+    "Real GDP growth rate (year-on-year %)"
+   ]
+  },
+  {
+   "code": "Variable",
+   "text": "Variable",
+   "values": [
+    "Gross Domestic Expenditure",
+    "Domestic demand",
+    "Consumption",
+    "Government final consumption expenditure",
+    "Household final consumption expenditure",
+    "NPISH final consumption",
+    "Gross capital formation",
+    "Gross fixed capital formation",
+    "Change in stock, Crude Oil",
+    "Change in stock, Livestock",
+    "Change in stock, Reforestation",
+    "Net exports",
+    "Import of goods and services",
+    "Exports of goods and services"
+   ],
+   "valueTexts": [
+    "Gross Domestic Expenditure",
+    "Domestic demand",
+    "Consumption",
+    "Government final consumption expenditure",
+    "Household final consumption expenditure",
+    "NPISH final consumption",
+    "Gross capital formation",
+    "Gross fixed capital formation",
+    "Change in stock, Crude Oil",
+    "Change in stock, Livestock",
+    "Change in stock, Reforestation",
+    "Net exports",
+    "Import of goods and services",
+    "Exports of goods and services"
+   ],
+   "elimination": true
+  }
+ ]
+}

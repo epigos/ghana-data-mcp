@@ -4,13 +4,14 @@
 [![Upstream canary](https://github.com/epigos/ghana-data-mcp/actions/workflows/upstream-canary.yml/badge.svg)](https://github.com/epigos/ghana-data-mcp/actions/workflows/upstream-canary.yml)
 
 An MCP server that gives AI tools access to public Ghana data — share prices from the
-Ghana Stock Exchange, treasury data from the Bank of Ghana, and macroeconomic
-indicators from the IMF. It runs on Cloudflare Workers as a remote MCP server over
+Ghana Stock Exchange, treasury data from the Bank of Ghana, official national
+statistics from the Ghana Statistical Service, and macroeconomic indicators from the
+IMF. It runs on Cloudflare Workers as a remote MCP server over
 Streamable HTTP.
 
 ## Tools
 
-Eleven tools, all read-only, namespaced by source.
+Fourteen tools, all read-only, namespaced by source.
 
 **Ghana Stock Exchange** — [full reference and sample queries](docs/GSE.md)
 
@@ -37,6 +38,14 @@ Eleven tools, all read-only, namespaced by source.
 | ---- | ------- |
 | [`imf_list_indicators`](docs/IMF.md#imf_list_indicators) | Search ~130 macroeconomic indicators by keyword; returns the code each needs |
 | [`imf_get_indicator_history`](docs/IMF.md#imf_get_indicator_history) | Time series for one or more indicators — GDP, inflation, debt, and more — for Ghana and, optionally, other countries, regions or groups |
+
+**Ghana Statistical Service** — [full reference and sample queries](docs/GSS.md)
+
+| Tool | Returns |
+| ---- | ------- |
+| [`gss_list_tables`](docs/GSS.md#gss_list_tables) | The 16 official StatsBank macroeconomic tables, filterable by keyword or sector |
+| [`gss_describe_table`](docs/GSS.md#gss_describe_table) | One table's filterable dimensions, the values each accepts, and which periods are published |
+| [`gss_get_data`](docs/GSS.md#gss_get_data) | Observations for a table — official CPI for Ghana and all 16 regions, GDP, debt, fiscal, money, rates, trade and more |
 
 Plus `ping` — no input, returns `{ ok, server, version }`. It belongs to no source and
 touches nothing upstream, which makes it a clean connectivity check.
@@ -125,9 +134,12 @@ Then something real:
 
 > What has the IMF forecast for Ghana's GDP growth next year?
 
+> What is Ghana's official inflation rate, and is it worse in the north?
+
 Each source's guide has a fuller set, chosen to exercise its tools and the awkward parts
 of its data — [GSE](docs/GSE.md#sample-chat-queries),
-[Bank of Ghana](docs/BOG.md#sample-chat-queries), [IMF](docs/IMF.md#sample-chat-queries).
+[Bank of Ghana](docs/BOG.md#sample-chat-queries), [IMF](docs/IMF.md#sample-chat-queries),
+[Ghana Statistical Service](docs/GSS.md#sample-chat-queries).
 
 ## Deploying
 
@@ -153,7 +165,7 @@ time stays low.
 ## How it works
 
 ```
-MCP client ──► Worker /mcp ──► sources/{gse,bog,imf} ──► lib/{http,cache,rateLimit} ──► source site
+MCP client ──► Worker /mcp ──► sources/{gse,bog,imf,gss} ──► lib/{http,cache,rateLimit} ──► source site
                                                             │
                                                        Workers KV
 ```
@@ -195,12 +207,20 @@ Per-source cache keys and TTLs are documented with the source.
 ```bash
 npm test          # unit tests, no network
 npm run typecheck
-npm run test:live # optional: hits gse.com.gh and the IMF API to catch upstream changes
+npm run test:live # optional: hits gse.com.gh, the IMF API and StatsBank to catch upstream changes
 ```
 
 The unit tests run against saved fixtures in `test/fixtures/`, so CI never depends on a
 third-party site being up. `test:live` is the canary for upstream changes and is skipped
 by default.
+
+**One local-development caveat.** StatsBank negotiates TLS 1.2 with CBC-only cipher
+suites and no AEAD. Cloudflare's production runtime and Node both connect to it fine,
+but local `wrangler dev` cannot — so every `gss_*` call needing the network fails under
+`npm run dev` with `Network connection lost`, while working on the deployed Worker. It is
+a cipher-overlap limit in the local runtime, not something this code can fix. Develop
+against that source through `npm run test:live` or the deployed URL; the details are in
+[docs/GSS.md](docs/GSS.md#a-note-on-local-development).
 
 ### CI
 

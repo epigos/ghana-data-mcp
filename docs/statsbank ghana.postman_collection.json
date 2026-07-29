@@ -1,0 +1,588 @@
+{
+  "info": {
+    "_postman_id": "47e37a51-aac3-4c6a-81b3-8f80027dcb82",
+    "name": "statsbank ghana",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "135737",
+    "_collection_link": "https://go.postman.co/collection/135737-47e37a51-aac3-4c6a-81b3-8f80027dcb82?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "commodity prices",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": [\n    {\n      \"code\": \"Month\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"2024M06\"\n        ]\n      }\n    }\n  ],\n  \"response\": {\n    \"format\": \"json\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://statsbank.statsghana.gov.gh:443/api/v1/en/Macroeconomic Indicators/Prices and Inflation/commodity_price.px",
+          "protocol": "https",
+          "host": [
+            "statsbank",
+            "statsghana",
+            "gov",
+            "gh"
+          ],
+          "port": "443",
+          "path": [
+            "api",
+            "v1",
+            "en",
+            "Macroeconomic Indicators",
+            "Prices and Inflation",
+            "commodity_price.px"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "cpi",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": [\n    {\n      \"code\": \"Month\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"2026M01\"\n        ]\n      }\n    },\n    {\n      \"code\": \"Region\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"Ghana\"\n        ]\n      }\n    },\n    {\n      \"code\": \"Product\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"All products\"\n        ]\n      }\n    },\n    {\n      \"code\": \"Source\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"All sources\",\n          \"Local\",\n          \"Import\"\n        ]\n      }\n    }\n  ],\n  \"response\": {\n    \"format\": \"json\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://statsbank.statsghana.gov.gh:443/api/v1/en/Macroeconomic Indicators/Prices and Inflation/cpi.px",
+          "protocol": "https",
+          "host": [
+            "statsbank",
+            "statsghana",
+            "gov",
+            "gh"
+          ],
+          "port": "443",
+          "path": [
+            "api",
+            "v1",
+            "en",
+            "Macroeconomic Indicators",
+            "Prices and Inflation",
+            "cpi.px"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "iip",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": [\n    {\n      \"code\": \"Quarter\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"2025Q3\"\n        ]\n      }\n    },\n    {\n      \"code\": \"Sector\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"All industries\",\n          \"Mining and quarrying\",\n          \"Extraction of crude petroleum and natural gas\",\n          \"Mining of metal ores\",\n          \"Other mining and quarrying\",\n          \"Manfacturing\",\n          \"Manufacture of food products\",\n          \"Manufacture of beverages\",\n          \"Manufacture of textiles\",\n          \"Manufacture of wearing apparel\",\n          \"Manufacture of leather and related products\",\n          \"Manufacture of wood and of products of wood and cork\",\n          \"Manufacture of paper and paper products\",\n          \"Printing and reproduction of recorded media\",\n          \"Manufacture of coke and refined petroleum products\",\n          \"Manufacture of chemicals and chemical products\",\n          \"Manufacture of pharmaceuticals, medicinal chemical and botanical products\",\n          \"Manufacture of rubber and plastics products\",\n          \"Manufacture of other non-metallic mineral products\",\n          \"Manufacture of basic metals\",\n          \"Manufacture of fabricated metal products, except machinery and equipment\",\n          \"Manufacture of computer, electronic and optical products\",\n          \"Manufacture of electrical equipment\",\n          \"Manufacture of machinery and equipment n.e.c.\",\n          \"Manufacture of motor vehicles, trailers and semi-trailers\",\n          \"Manufacture of other transport equipment\",\n          \"Manufacture of furniture\",\n          \"Other manufacturing\",\n          \"Repair and installation of machinery and equipment\",\n          \"Electricity and gas\",\n          \"Electricity, gas, steam and air conditioning supply\",\n          \"Water supply, sewage and waste management\",\n          \"Water collection, treatment and supply\",\n          \"Waste collection, treatment and disposal activities; materials recovery\"\n        ]\n      }\n    }\n  ],\n  \"response\": {\n    \"format\": \"json\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://statsbank.statsghana.gov.gh:443/api/v1/en/Macroeconomic Indicators/Prices and Inflation/iip.px",
+          "protocol": "https",
+          "host": [
+            "statsbank",
+            "statsghana",
+            "gov",
+            "gh"
+          ],
+          "port": "443",
+          "path": [
+            "api",
+            "v1",
+            "en",
+            "Macroeconomic Indicators",
+            "Prices and Inflation",
+            "iip.px"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "macro_xmpi",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": [\n    {\n      \"code\": \"Quarter\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"2025Q4\"\n        ]\n      }\n    },\n    {\n      \"code\": \"Product_Classification\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"All Products\",\n          \"Gold\",\n          \"Mineral Fuels and Oils\",\n          \"Cocoa Beans and Products\",\n          \"Machinery and Electrical Equipment\",\n          \"Chemical Products\",\n          \"Vehicles and Automotive Parts\",\n          \"Iron and Steel\",\n          \"Plastics\",\n          \"Vegetable Products\",\n          \"Other Products\"\n        ]\n      }\n    }\n  ],\n  \"response\": {\n    \"format\": \"json\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://statsbank.statsghana.gov.gh:443/api/v1/en/Macroeconomic Indicators/Prices and Inflation/macro_xmpi.px",
+          "protocol": "https",
+          "host": [
+            "statsbank",
+            "statsghana",
+            "gov",
+            "gh"
+          ],
+          "port": "443",
+          "path": [
+            "api",
+            "v1",
+            "en",
+            "Macroeconomic Indicators",
+            "Prices and Inflation",
+            "macro_xmpi.px"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "ppi",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": [\n    {\n      \"code\": \"Month\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"2026M04\"\n        ]\n      }\n    },\n    {\n      \"code\": \"Industry\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"All industries\",\n          \"Mining and quarrying\",\n          \"Mining and quarrying (excluding petroleum)*\",\n          \"Manufacturing\",\n          \"Electricity and gas\",\n          \"Water supply, sewerage, waste management\",\n          \"Water collection, treatment and supply*\",\n          \"Construction\",\n          \"Transportation and storage\",\n          \"Accommdation and food service\",\n          \"Information and communication\"\n        ]\n      }\n    }\n  ],\n  \"response\": {\n    \"format\": \"json\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://statsbank.statsghana.gov.gh:443/api/v1/en/Macroeconomic Indicators/Prices and Inflation/ppi.px",
+          "protocol": "https",
+          "host": [
+            "statsbank",
+            "statsghana",
+            "gov",
+            "gh"
+          ],
+          "port": "443",
+          "path": [
+            "api",
+            "v1",
+            "en",
+            "Macroeconomic Indicators",
+            "Prices and Inflation",
+            "ppi.px"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "agdp_e_px",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": [\n    {\n      \"code\": \"Year\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"2025**\"\n        ]\n      }\n    },\n    {\n      \"code\": \"Variable\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"Gross Domestic Expenditure\",\n          \"Domestic demand\",\n          \"Consumption\",\n          \"Government final consumption expenditure\",\n          \"Household final consumption expenditure\",\n          \"NPISH final consumption\",\n          \"Gross capital formation\",\n          \"Gross fixed capital formation\",\n          \"Change in stock, Crude Oil\",\n          \"Change in stock, Livestock\",\n          \"Change in stock, Reforestation\",\n          \"Net exports\",\n          \"Import of goods and services\",\n          \"Exports of goods and services\"\n        ]\n      }\n    }\n  ],\n  \"response\": {\n    \"format\": \"json\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://statsbank.statsghana.gov.gh:443/api/v1/en/Macroeconomic Indicators/Real Sector (GDP)/Annual GDP/agdp_e_px.px",
+          "protocol": "https",
+          "host": [
+            "statsbank",
+            "statsghana",
+            "gov",
+            "gh"
+          ],
+          "port": "443",
+          "path": [
+            "api",
+            "v1",
+            "en",
+            "Macroeconomic Indicators",
+            "Real Sector (GDP)",
+            "Annual GDP",
+            "agdp_e_px.px"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "agdp_p_p",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": [\n    {\n      \"code\": \"Year\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"2025**\"\n        ]\n      }\n    },\n    {\n      \"code\": \"Variable\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"Overall GDP\",\n          \"Agriculture\",\n          \"Crops\",\n          \"Cocoa\",\n          \"Livestock\",\n          \"Forestry and logging\",\n          \"Fishing\",\n          \"Industry\",\n          \"Mining and quarrying\",\n          \"Oil and gas\",\n          \"Gold\",\n          \"Manufacturing\",\n          \"Electricity\",\n          \"Water and sewerage\",\n          \"Construction\",\n          \"Services\",\n          \"Trade; repair of vehicles, household goods\",\n          \"Accommodation and food service activities\",\n          \"Transport and storage\",\n          \"Information and communication\",\n          \"Financial and insurance activities\",\n          \"Real estate\",\n          \"Professional, administrative and support service activities\",\n          \"Public administration and defence; social security\",\n          \"Education\",\n          \"Health and social work\",\n          \"Other personal service activities\",\n          \"Net indirect taxes\",\n          \"Informal GDP\",\n          \"Non-oil GDP\",\n          \"Non-gold GDP\",\n          \"Per capita GDP\",\n          \"Per capita GNI\"\n        ]\n      }\n    }\n  ],\n  \"response\": {\n    \"format\": \"json\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://statsbank.statsghana.gov.gh:443/api/v1/en/Macroeconomic Indicators/Real Sector (GDP)/Annual GDP/agdp_p_p.px",
+          "protocol": "https",
+          "host": [
+            "statsbank",
+            "statsghana",
+            "gov",
+            "gh"
+          ],
+          "port": "443",
+          "path": [
+            "api",
+            "v1",
+            "en",
+            "Macroeconomic Indicators",
+            "Real Sector (GDP)",
+            "Annual GDP",
+            "agdp_p_p.px"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "debt_data",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": [\n    {\n      \"code\": \"Month\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"2024M06\"\n        ]\n      }\n    }\n  ],\n  \"response\": {\n    \"format\": \"json\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://statsbank.statsghana.gov.gh:443/api/v1/en/Macroeconomic Indicators/Fiscal Sector/debt_data.px",
+          "protocol": "https",
+          "host": [
+            "statsbank",
+            "statsghana",
+            "gov",
+            "gh"
+          ],
+          "port": "443",
+          "path": [
+            "api",
+            "v1",
+            "en",
+            "Macroeconomic Indicators",
+            "Fiscal Sector",
+            "debt_data.px"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "fiscal_data",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": [\n    {\n      \"code\": \"Time_Period\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"2024Q2\"\n        ]\n      }\n    },\n    {\n      \"code\": \"Valuation_Parameter\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"Value in Ghana Cedis\",\n          \"Percentage of annual GDP\"\n        ]\n      }\n    }\n  ],\n  \"response\": {\n    \"format\": \"json\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://statsbank.statsghana.gov.gh:443/api/v1/en/Macroeconomic Indicators/Fiscal Sector/fiscal_data.px",
+          "protocol": "https",
+          "host": [
+            "statsbank",
+            "statsghana",
+            "gov",
+            "gh"
+          ],
+          "port": "443",
+          "path": [
+            "api",
+            "v1",
+            "en",
+            "Macroeconomic Indicators",
+            "Fiscal Sector",
+            "fiscal_data.px"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "fin_sound",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": [\n    {\n      \"code\": \"Month\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"2024M06\"\n        ]\n      }\n    }\n  ],\n  \"response\": {\n    \"format\": \"json\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://statsbank.statsghana.gov.gh:443/api/v1/en/Macroeconomic Indicators/Monetary and Financial Sector/fin_sound.px",
+          "protocol": "https",
+          "host": [
+            "statsbank",
+            "statsghana",
+            "gov",
+            "gh"
+          ],
+          "port": "443",
+          "path": [
+            "api",
+            "v1",
+            "en",
+            "Macroeconomic Indicators",
+            "Monetary and Financial Sector",
+            "fin_sound.px"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "interest",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": [\n    {\n      \"code\": \"Month\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"2024M07\"\n        ]\n      }\n    }\n  ],\n  \"response\": {\n    \"format\": \"json\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://statsbank.statsghana.gov.gh:443/api/v1/en/Macroeconomic Indicators/Monetary and Financial Sector/interest.px",
+          "protocol": "https",
+          "host": [
+            "statsbank",
+            "statsghana",
+            "gov",
+            "gh"
+          ],
+          "port": "443",
+          "path": [
+            "api",
+            "v1",
+            "en",
+            "Macroeconomic Indicators",
+            "Monetary and Financial Sector",
+            "interest.px"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "monetary",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": [\n    {\n      \"code\": \"Month\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"2024M07\"\n        ]\n      }\n    }\n  ],\n  \"response\": {\n    \"format\": \"json\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://statsbank.statsghana.gov.gh:443/api/v1/en/Macroeconomic Indicators/Monetary and Financial Sector/monetary.px",
+          "protocol": "https",
+          "host": [
+            "statsbank",
+            "statsghana",
+            "gov",
+            "gh"
+          ],
+          "port": "443",
+          "path": [
+            "api",
+            "v1",
+            "en",
+            "Macroeconomic Indicators",
+            "Monetary and Financial Sector",
+            "monetary.px"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "fuel",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": [\n    {\n      \"code\": \"Month\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"2024M06\"\n        ]\n      }\n    }\n  ],\n  \"response\": {\n    \"format\": \"json\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://statsbank.statsghana.gov.gh:443/api/v1/en/Macroeconomic Indicators/fuel.px",
+          "protocol": "https",
+          "host": [
+            "statsbank",
+            "statsghana",
+            "gov",
+            "gh"
+          ],
+          "port": "443",
+          "path": [
+            "api",
+            "v1",
+            "en",
+            "Macroeconomic Indicators",
+            "fuel.px"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "mieg",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": [\n    {\n      \"code\": \"Month\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"2026M04\"\n        ]\n      }\n    }\n  ],\n  \"response\": {\n    \"format\": \"json\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://statsbank.statsghana.gov.gh:443/api/v1/en/Macroeconomic Indicators/Monthly Indicator of Economic Growth(MIEG)/April_26_MIEG_Px.px",
+          "protocol": "https",
+          "host": [
+            "statsbank",
+            "statsghana",
+            "gov",
+            "gh"
+          ],
+          "port": "443",
+          "path": [
+            "api",
+            "v1",
+            "en",
+            "Macroeconomic Indicators",
+            "Monthly Indicator of Economic Growth(MIEG)",
+            "April_26_MIEG_Px.px"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "macro_trade",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": [\n    {\n      \"code\": \"Time_Period\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"2025Q4\"\n        ]\n      }\n    },\n    {\n      \"code\": \"Tradeflow\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"Total Trade\",\n          \"Export\",\n          \"Import\"\n        ]\n      }\n    },\n    {\n      \"code\": \"Product_Classification\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"All Products\",\n          \"Gold\",\n          \"Mineral Fuels and Oils\",\n          \"Cocoa Beans and Products\",\n          \"Machinery and Electrical Equipment\",\n          \"Chemical Products\",\n          \"Vehicles and Automotive Parts\",\n          \"Iron and Steel\",\n          \"Plastics\",\n          \"Vegetable Products\",\n          \"Other Products\"\n        ]\n      }\n    }\n  ],\n  \"response\": {\n    \"format\": \"json\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://statsbank.statsghana.gov.gh:443/api/v1/en/Macroeconomic Indicators/External Sector/macro_trade.px",
+          "protocol": "https",
+          "host": [
+            "statsbank",
+            "statsghana",
+            "gov",
+            "gh"
+          ],
+          "port": "443",
+          "path": [
+            "api",
+            "v1",
+            "en",
+            "Macroeconomic Indicators",
+            "External Sector",
+            "macro_trade.px"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "int_fin",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": [\n    {\n      \"code\": \"Time_Period\",\n      \"selection\": {\n        \"filter\": \"item\",\n        \"values\": [\n          \"2024Q2\"\n        ]\n      }\n    }\n  ],\n  \"response\": {\n    \"format\": \"json\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://statsbank.statsghana.gov.gh:443/api/v1/en/Macroeconomic Indicators/External Sector/int_fin.px",
+          "protocol": "https",
+          "host": [
+            "statsbank",
+            "statsghana",
+            "gov",
+            "gh"
+          ],
+          "port": "443",
+          "path": [
+            "api",
+            "v1",
+            "en",
+            "Macroeconomic Indicators",
+            "External Sector",
+            "int_fin.px"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

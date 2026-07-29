@@ -1,0 +1,121 @@
+{
+ "title": "Monthly Indicator of Economic Growth (MIEG)",
+ "variables": [
+  {
+   "code": "Month",
+   "text": "Month",
+   "values": [
+    "2023M01",
+    "2023M02",
+    "2023M03",
+    "2023M04",
+    "2023M05",
+    "2023M06",
+    "2023M07",
+    "2023M08",
+    "2023M09",
+    "2023M10",
+    "2023M11",
+    "2023M12",
+    "2024M01",
+    "2024M02",
+    "2024M03",
+    "2024M04",
+    "2024M05",
+    "2024M06",
+    "2024M07",
+    "2024M08",
+    "2024M09",
+    "2024M10",
+    "2024M11",
+    "2024M12",
+    "2025M01",
+    "2025M02",
+    "2025M03",
+    "2025M04",
+    "2025M05",
+    "2025M06",
+    "2025M07",
+    "2025M08",
+    "2025M09",
+    "2025M10",
+    "2025M11",
+    "2025M12",
+    "2026M01",
+    "2026M02",
+    "2026M03",
+    "2026M04"
+   ],
+   "valueTexts": [
+    "Jan-23",
+    "Feb-23",
+    "Mar-23",
+    "Apr-23",
+    "May-23",
+    "Jun-23",
+    "Jul-23",
+    "Aug-23",
+    "Sep-23",
+    "Oct-23",
+    "Nov-23",
+    "Dec-23",
+    "Jan-24",
+    "Feb-24",
+    "Mar-24",
+    "Apr-24",
+    "May-24",
+    "Jun-24",
+    "Jul-24",
+    "Aug-24",
+    "Sep-24",
+    "Oct-24",
+    "Nov-24",
+    "Dec-24",
+    "Jan-25",
+    "Feb-25",
+    "Mar-25",
+    "Apr-25",
+    "May-25",
+    "Jun-25",
+    "Jul-25",
+    "Aug-25",
+    "Sep-25",
+    "Oct-25",
+    "Nov-25",
+    "Dec-25",
+    "Jan-26",
+    "Feb-26",
+    "Mar-26",
+    "Apr-26"
+   ]
+  },
+  {
+   "code": "GDP_Series",
+   "text": "GDP_Series",
+   "values": [
+    "INDEX",
+    "GROWTH"
+   ],
+   "valueTexts": [
+    "MIEG Index Value (2023=100)",
+    "MIEG Index Growth (year-on-year %)"
+   ]
+  },
+  {
+   "code": "Variable",
+   "text": "Variable",
+   "values": [
+    "AGRICULTURE",
+    "INDUSTRY",
+    "SERVICES",
+    "TOTAL"
+   ],
+   "valueTexts": [
+    "Agriculture_MIEG",
+    "Industry_MIEG",
+    "Services_MIEG",
+    "Total_MIEG"
+   ]
+  }
+ ]
+}

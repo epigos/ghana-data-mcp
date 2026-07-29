@@ -9,6 +9,8 @@ import { BogClient } from "./sources/bog/client.js";
 import { registerBogTools } from "./sources/bog/tools.js";
 import { GseClient } from "./sources/gse/client.js";
 import { registerGseTools } from "./sources/gse/tools.js";
+import { GssClient } from "./sources/gss/client.js";
+import { registerGssTools } from "./sources/gss/tools.js";
 import { ImfClient } from "./sources/imf/client.js";
 import { registerImfTools } from "./sources/imf/tools.js";
 
@@ -30,6 +32,12 @@ export function createServer(env: Env): McpServer {
         "rates, Treasury and central-bank bill rates, and interbank money-market rates. " +
         "`imf_*` covers IMF macroeconomic indicators for Ghana — resolve a name to a code with " +
         "imf_list_indicators first, and always flag IMF's own forward projections as such. " +
+        "`gss_*` covers the Ghana Statistical Service's own StatsBank: official CPI and inflation " +
+        "for Ghana and all 16 regions, GDP, public debt, fiscal accounts, money and credit, " +
+        "interest rates, banking soundness, merchandise trade and balance of payments. Find a " +
+        "table with gss_list_tables, then fetch with gss_get_data; rows flagged `provisional` are " +
+        "figures GSS has not finalized and must be reported as such. Prefer gss_* over imf_* when " +
+        "the question is about Ghana's own published statistics rather than IMF estimates. " +
         "Every result carries a `meta.origin` field; when it is `stale-cache` or " +
         "`static-seed`, tell the user the data may be behind.",
     },
@@ -72,6 +80,12 @@ export function createServer(env: Env): McpServer {
 
   registerImfTools(server, {
     client: new ImfClient({ timeoutMs: 15_000, retries: 2, logger }),
+    cache,
+    logger,
+  });
+
+  registerGssTools(server, {
+    client: new GssClient({ timeoutMs: 20_000, retries: 2, logger }),
     cache,
     logger,
   });

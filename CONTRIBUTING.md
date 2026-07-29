@@ -10,8 +10,8 @@ Every MCP tool is prefixed with its source:
 | Source                     | Prefix  | Example                 |
 | -------------------------- | ------- | ----------------------- |
 | Ghana Stock Exchange       | `gse_`  | `gse_get_stock_history` |
-| Bank of Ghana (planned)    | `bog_`  | `bog_get_exchange_rate` |
-| Ghana Statistical Service  | `gss_`  | `gss_get_indicator`     |
+| Bank of Ghana              | `bog_`  | `bog_get_exchange_rate` |
+| Ghana Statistical Service  | `gss_`  | `gss_get_data`          |
 
 Two reasons it matters. A model choosing between thirty tools needs to see which
 data source a tool belongs to from its name alone. And a prefix keeps a future
