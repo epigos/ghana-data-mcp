@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ghana Data MCP — public Ghana market data for AI tools</title>
-<meta name="description" content="Free MCP server for public Ghana data — Ghana Stock Exchange, Bank of Ghana, and IMF indicators — for Claude, ChatGPT, Cursor, and any MCP client.">
+<meta name="description" content="Free MCP server for public Ghana data — Ghana Stock Exchange, Bank of Ghana, Ghana Statistical Service, and IMF indicators — for Claude, ChatGPT, Cursor, and any MCP client.">
 <meta name="author" content="Philip Adzanoukpe (epigos)">
 <meta name="robots" content="index, follow">
 <meta name="theme-color" content="#F2F5EC" media="(prefers-color-scheme: light)">
@@ -15,14 +15,14 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Ghana Data MCP">
 <meta property="og:title" content="Ghana Data MCP — public Ghana market data for AI tools">
-<meta property="og:description" content="Free MCP server for public Ghana data — Ghana Stock Exchange, Bank of Ghana, and IMF indicators — for Claude, ChatGPT, Cursor, and any MCP client.">
+<meta property="og:description" content="Free MCP server for public Ghana data — Ghana Stock Exchange, Bank of Ghana, Ghana Statistical Service, and IMF indicators — for Claude, ChatGPT, Cursor, and any MCP client.">
 <meta property="og:url" content="https://ghana-data-mcp.epigos.workers.dev/">
 <meta property="og:locale" content="en_US">
 
 <!-- Twitter -->
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Ghana Data MCP — public Ghana market data for AI tools">
-<meta name="twitter:description" content="Free MCP server for public Ghana data — Ghana Stock Exchange, Bank of Ghana, and IMF indicators — for Claude, ChatGPT, Cursor, and any MCP client.">
+<meta name="twitter:description" content="Free MCP server for public Ghana data — Ghana Stock Exchange, Bank of Ghana, Ghana Statistical Service, and IMF indicators — for Claude, ChatGPT, Cursor, and any MCP client.">
 
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>%F0%9F%87%AC%F0%9F%87%AD</text></svg>">
 
@@ -33,7 +33,7 @@
   "name": "Ghana Data MCP",
   "alternateName": "ghana-data-mcp",
   "url": "https://ghana-data-mcp.epigos.workers.dev/",
-  "description": "Free MCP server for public Ghana data — Ghana Stock Exchange, Bank of Ghana, and IMF indicators — for Claude, ChatGPT, Cursor, and any MCP client.",
+  "description": "Free MCP server for public Ghana data — Ghana Stock Exchange, Bank of Ghana, Ghana Statistical Service, and IMF indicators — for Claude, ChatGPT, Cursor, and any MCP client.",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Any",
   "offers": {
@@ -68,6 +68,14 @@
     --forest: #386249;
     --shadow: rgba(26, 29, 23, 0.10);
     --code-bg: #E9EEDD;
+    /* Source-tag fills. Held as per-theme tokens because the accents flip lightness
+       between themes: dark fills need light text, light fills need dark text. The
+       earlier hardcoded near-black on dark green/red sat around 2.5:1. */
+    --tag-ink: #FBF9F3;
+    --tag-gse: #7A5714;
+    --tag-bog: #2F5340;
+    --tag-imf: #8A3527;
+    --tag-gss: #2F4A5E;
 
     --font-display: "Bodoni 72", "Bodoni MT", Didot, "Playfair Display", Georgia, serif;
     --font-body: Seravek, "Gill Sans", "Gill Sans MT", Calibri, "Segoe UI", sans-serif;
@@ -93,6 +101,11 @@
       --forest: #6BA087;
       --shadow: rgba(0, 0, 0, 0.45);
       --code-bg: #1B2027;
+    --tag-ink: #12140F;
+    --tag-gse: #D6A94D;
+    --tag-bog: #6BA087;
+    --tag-imf: #C2705D;
+    --tag-gss: #7FA6BE;
       color-scheme: dark;
     }
   }
@@ -113,6 +126,11 @@
     --forest: #6BA087;
     --shadow: rgba(0, 0, 0, 0.45);
     --code-bg: #1B2027;
+    --tag-ink: #12140F;
+    --tag-gse: #D6A94D;
+    --tag-bog: #6BA087;
+    --tag-imf: #C2705D;
+    --tag-gss: #7FA6BE;
     color-scheme: dark;
   }
 
@@ -132,6 +150,11 @@
     --forest: #386249;
     --shadow: rgba(26, 29, 23, 0.10);
     --code-bg: #E9EEDD;
+    --tag-ink: #FBF9F3;
+    --tag-gse: #7A5714;
+    --tag-bog: #2F5340;
+    --tag-imf: #8A3527;
+    --tag-gss: #2F4A5E;
     color-scheme: light;
   }
 
@@ -383,12 +406,13 @@
     letter-spacing: 0.08em;
     padding: 0.2rem 0.5rem;
     border-radius: 2px;
-    color: #1A1204;
+    color: var(--tag-ink);
   }
 
-  .source-tag.gse { background: var(--gold); }
-  .source-tag.bog { background: var(--forest); color: #08150E; }
-  .source-tag.imf { background: var(--brick); color: #1A0908; }
+  .source-tag.gse { background: var(--tag-gse); }
+  .source-tag.bog { background: var(--tag-bog); }
+  .source-tag.imf { background: var(--tag-imf); }
+  .source-tag.gss { background: var(--tag-gss); }
 
   .ledger-group-head h3 {
     font-size: 1.05rem;
@@ -858,13 +882,13 @@
         <p class="eyebrow">A REMOTE MCP SERVER, STREAMABLE HTTP, NO API KEY</p>
         <h1>Public Ghana market data,<br>wired straight into your <span class="accent">AI tools</span>.</h1>
         <p class="lede">
-          Eleven read-only tools bring the Ghana Stock Exchange, the Bank of Ghana, and the
-          IMF's macroeconomic indicators to any MCP client — Claude, or anything else that
+          Fourteen read-only tools bring the Ghana Stock Exchange, the Bank of Ghana, the Ghana
+          Statistical Service and the IMF to any MCP client — Claude, or anything else that
           speaks the protocol. No scraping in your prompt, no stale copy-paste from a PDF.
         </p>
         <div class="cta-row">
           <a class="btn primary" href="#setup">Connect a client →</a>
-          <a class="btn" href="#tools">Browse the eleven tools</a>
+          <a class="btn" href="#tools">Browse the fourteen tools</a>
         </div>
       </div>
     </section>
@@ -872,20 +896,24 @@
     <section class="stats">
       <div class="stat-grid">
         <div class="stat">
-          <div class="value num">11</div>
+          <div class="value num">14</div>
           <div class="label">Read-only tools</div>
         </div>
         <div class="stat">
-          <div class="value num">3</div>
+          <div class="value num">4</div>
           <div class="label">Data sources</div>
         </div>
         <div class="stat">
-          <div class="value num">1996</div>
-          <div class="label">FX history begins</div>
+          <div class="value num">16</div>
+          <div class="label">StatsBank tables</div>
         </div>
         <div class="stat">
           <div class="value num">~130</div>
           <div class="label">IMF indicators</div>
+        </div>
+        <div class="stat">
+          <div class="value num">1971</div>
+          <div class="label">Earliest series</div>
         </div>
         <div class="stat">
           <div class="value num">0</div>
@@ -897,7 +925,7 @@
     <section id="tools">
       <div class="section-head">
         <p class="eyebrow">THE LEDGER</p>
-        <h2>Eleven tools, three sources</h2>
+        <h2>Fourteen tools, four sources</h2>
         <p>Every tool is read-only and namespaced by where its data comes from. Full parameter
           reference lives in the repo's <code>docs/</code> folder, linked from each row.</p>
       </div>
@@ -967,6 +995,26 @@
         <div class="ledger-row">
           <code>imf_get_indicator_history</code>
           <span class="returns">Time series for one or more indicators — GDP, inflation, debt, and more — for Ghana and, optionally, other countries, regions or analytical groups</span>
+        </div>
+      </div>
+
+      <div class="ledger-group">
+        <div class="ledger-group-head">
+          <span class="source-tag gss">GSS</span>
+          <h3>Ghana Statistical Service</h3>
+          <span class="src-note">StatsBank · PxWeb</span>
+        </div>
+        <div class="ledger-row">
+          <code>gss_list_tables</code>
+          <span class="returns">The 16 official StatsBank macroeconomic tables, filterable by keyword or sector</span>
+        </div>
+        <div class="ledger-row">
+          <code>gss_describe_table</code>
+          <span class="returns">One table's filterable dimensions, every value each accepts, and which periods are published</span>
+        </div>
+        <div class="ledger-row">
+          <code>gss_get_data</code>
+          <span class="returns">Observations for a table — official CPI for Ghana and all 16 regions, GDP, public debt, fiscal accounts, money and credit, rates, trade and more</span>
         </div>
       </div>
 
@@ -1165,9 +1213,9 @@ npm run dev</pre>
     <section id="use-cases">
       <div class="section-head">
         <p class="eyebrow">WHAT IT'S FOR</p>
-        <h2>Five things people actually build with it</h2>
-        <p>All read-only, all pointed at public sources — the tools compose across GSE, BoG
-          and IMF rather than staying siloed by source.</p>
+        <h2>Seven things people actually build with it</h2>
+        <p>All read-only, all pointed at public sources — the tools compose across GSE, BoG,
+          GSS and IMF rather than staying siloed by source.</p>
       </div>
       <div class="usecase-grid">
         <div class="usecase">
@@ -1197,6 +1245,13 @@ npm run dev</pre>
           <p>Benchmark Ghana against a named neighbor or a whole bloc — Nigeria, Senegal,
             ECOWAS, Sub-Saharan Africa — on the same indicator, same call.</p>
           <div class="tools-used">imf_get_indicator_history({ countries: [...] })</div>
+        </div>
+        <div class="usecase">
+          <div class="glyph">◉</div>
+          <h3>Regional inflation monitor</h3>
+          <p>Official GSS inflation for Ghana and all 16 regions, split by product basket and by
+            local or imported source — the figure Ghanaian policy documents actually quote.</p>
+          <div class="tools-used">gss_get_data({ table: "cpi", filters: { Region: [...] } })</div>
         </div>
         <div class="usecase">
           <div class="glyph">◈</div>
@@ -1253,6 +1308,21 @@ npm run dev</pre>
           <div class="msg q">Find me an indicator about government debt.</div>
           <div class="msg a"><span class="tool">imf</span><span class="text">Searches the catalog by keyword and returns matches across datasets — WEO's headline figure and the Global Debt Database's, distinguished by description.</span></div>
         </div>
+        <div class="transcript">
+          <div class="bar"><span class="dot"></span> Chat</div>
+          <div class="msg q">What is Ghana's official inflation rate?</div>
+          <div class="msg a"><span class="tool">gss</span><span class="text">Reads the year-on-year rate straight from the Statistical Service's own CPI table — the number quoted in Ghanaian press and policy papers, not an IMF estimate of it.</span></div>
+        </div>
+        <div class="transcript">
+          <div class="bar"><span class="dot"></span> Chat</div>
+          <div class="msg q">Is inflation worse in the north than in Accra?</div>
+          <div class="msg a"><span class="tool">gss</span><span class="text">One call, one row per region: Greater Accra against Northern, Upper West and Upper East. All 16 regions are available on the same table.</span></div>
+        </div>
+        <div class="transcript">
+          <div class="bar"><span class="dot"></span> Chat</div>
+          <div class="msg q">How much did Ghana earn from gold exports last year?</div>
+          <div class="msg a"><span class="tool">gss</span><span class="text">Quarterly export value in US dollars from the customs trade table. Asks for a granularity first, because that table also holds monthly and annual rows and mixing them would double-count.</span></div>
+        </div>
       </div>
     </section>
 
@@ -1265,7 +1335,7 @@ npm run dev</pre>
         <div class="flow">
           <span class="node">MCP client</span>
           <span class="step"><span class="arrow">──▶</span><span class="node">Worker /mcp</span></span>
-          <span class="step"><span class="arrow">──▶</span><span class="node">sources/{gse,bog,imf}</span></span>
+          <span class="step"><span class="arrow">──▶</span><span class="node">sources/{gse,bog,imf,gss}</span></span>
           <span class="step"><span class="arrow">──▶</span><span class="node">lib/{http,cache,rateLimit}</span></span>
           <span class="step"><span class="arrow">──▶</span><span class="node">source site</span></span>
         </div>
@@ -1292,8 +1362,8 @@ npm run dev</pre>
       <div class="meta-line">Model Context Protocol · Cloudflare Workers · Workers KV</div>
     </div>
     <div class="block">
-      <p style="margin: 0;">Data belongs to the Ghana Stock Exchange, the Bank of Ghana,<br>
-        and the International Monetary Fund. This project only relays it.</p>
+      <p style="margin: 0;">Data belongs to the Ghana Stock Exchange, the Bank of Ghana, the<br>
+        Ghana Statistical Service and the IMF. This project only relays it.</p>
       <div class="meta-line">No API key. No tracking. No warranty of any kind.</div>
     </div>
   </footer>
