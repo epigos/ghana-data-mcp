@@ -338,10 +338,9 @@ consumption genuinely reads `0.00` in some months and that is kept.
 ## How the data is fetched
 
 PxWeb is a two-step API: a `GET` on a table returns its variables and legal values, a
-`POST` with a query built from those returns the data. The 16 table paths in
-[`tables.ts`](../src/sources/gss/tables.ts) came from
-[`statsbank ghana.postman_collection.json`](statsbank%20ghana.postman_collection.json),
-kept alongside this doc as provenance.
+`POST` with a query built from those returns the data. The 16 table paths live in
+[`tables.ts`](../src/sources/gss/tables.ts); the folder listing described below is how
+you rediscover one whose upstream filename has changed.
 
 ```
 GET  /api/v1/en/Macroeconomic Indicators/Prices and Inflation/cpi.px   -> schema
