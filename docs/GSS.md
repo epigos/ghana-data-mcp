@@ -377,12 +377,27 @@ cannot**, and every `gss_*` call that needs the network fails there with
 `Network connection lost` after about 400ms.
 
 That is a cipher-overlap limitation in the local runtime, not a bug in this source
-and not something a code change here can fix. Consequences:
+and not something a code change here can fix.
 
-- The `gss_*` tools work on the deployed Worker and in the Node-based tests.
-- They do **not** work under `npm run dev`. Use the deployed URL, or run
-  `npm run test:live` (plain Node) when developing against this source.
+**The fix for local development is `--remote`:**
+
+```bash
+npx wrangler dev --remote
+```
+
+That runs your Worker on Cloudflare's edge instead of in local workerd, so it reaches
+StatsBank normally while you keep the usual local dev loop. Verified: `gss_describe_table`
+on `ppi` returns all 236 monthly periods under `--remote` and fails under plain
+`wrangler dev`.
+
+Other ways round it:
+
+- The deployed Worker works — StatsBank is reachable from Cloudflare's production runtime.
+- `npm run test:live` runs under plain Node, which negotiates the older ciphers fine.
 - `gss_list_tables` works everywhere, since it never leaves the Worker.
+
+A connection failure here says all of this in the error itself rather than suggesting a
+retry, because retrying under plain `wrangler dev` never succeeds.
 
 ### Caching
 

@@ -216,10 +216,16 @@ by default.
 
 **One local-development caveat.** StatsBank negotiates TLS 1.2 with CBC-only cipher
 suites and no AEAD. Cloudflare's production runtime and Node both connect to it fine,
-but local `wrangler dev` cannot — so every `gss_*` call needing the network fails under
-`npm run dev` with `Network connection lost`, while working on the deployed Worker. It is
-a cipher-overlap limit in the local runtime, not something this code can fix. Develop
-against that source through `npm run test:live` or the deployed URL; the details are in
+but local `wrangler dev` has no cipher in common with it — so every `gss_*` call needing
+the network fails under `npm run dev` with `Network connection lost`, while working on the
+deployed Worker. It is a limit of the local runtime, not something this code can fix.
+Run the dev server on Cloudflare's edge instead:
+
+```bash
+npx wrangler dev --remote
+```
+
+Details, and the other ways round it, in
 [docs/GSS.md](docs/GSS.md#a-note-on-local-development).
 
 ### CI

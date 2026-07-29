@@ -1,4 +1,4 @@
-import { ParseError } from "../../lib/errors.js";
+import { ParseError, UpstreamError } from "../../lib/errors.js";
 import { request, type RequestOptions } from "../../lib/http.js";
 import { silentLogger, type Logger } from "../../lib/log.js";
 
@@ -35,6 +35,40 @@ import { silentLogger, type Logger } from "../../lib/log.js";
 
 export const STATSBANK_BASE_URL = "https://statsbank.statsghana.gov.gh";
 const API_PATH = "/api/v1/en";
+
+/**
+ * Replaces the generic "could not be reached, retrying often works" message with the
+ * cause that actually explains it here.
+ *
+ * StatsBank serves TLS 1.2 with CBC-only cipher suites (`ECDHE-RSA-AES256-SHA384`,
+ * `ECDHE-RSA-AES128-SHA`) and offers no AEAD suite and no TLS 1.3. Cloudflare's
+ * production runtime and Node both negotiate that fine; local `wrangler dev` has no
+ * cipher in common with it and every connection dies at the handshake in ~500ms.
+ *
+ * `lib/http.ts` correctly classifies a handshake failure as a transient network fault,
+ * because for every other source that is what it is. Under local dev against this host
+ * it is permanent, and telling someone to retry sends them in a loop — which is exactly
+ * what happened the first time this was tested. So a connection-level failure (an
+ * `UpstreamError` carrying no HTTP status, meaning no response ever arrived) is
+ * re-thrown here as non-retryable with the workaround attached.
+ *
+ * A failure that *did* get an HTTP response is passed through untouched: a 404 or a 503
+ * from StatsBank means something else entirely and `lib/http.ts` already describes it
+ * correctly.
+ */
+function explainConnectionFailure(error: unknown, label: string): unknown {
+  const noResponseArrived = error instanceof UpstreamError && error.status === undefined;
+  if (!noResponseArrived) return error;
+
+  return new UpstreamError(
+    `${label} could not connect to StatsBank. StatsBank only offers TLS 1.2 with CBC ` +
+      "ciphers, which the local `wrangler dev` runtime cannot negotiate — if you are " +
+      "running locally, use `npx wrangler dev --remote` (runs on Cloudflare's edge, which " +
+      "can reach it), the deployed Worker, or `npm run test:live`. If this is the deployed " +
+      "Worker, StatsBank itself is unreachable and the outage is upstream",
+    { retryable: false, cause: error },
+  );
+}
 
 export interface GssClientOptions extends RequestOptions {
   baseUrl?: string;
@@ -104,20 +138,25 @@ export class GssClient {
   }
 
   private async getJson(url: string, label: string): Promise<unknown> {
-    const response = await request(url, { headers: { accept: "application/json" } }, {
-      ...this.requestOptions,
-      label,
-    });
+    const response = await this.send(url, { headers: { accept: "application/json" } }, label);
     return this.readJson(response, label);
   }
 
   private async postJson(url: string, body: string, label: string): Promise<unknown> {
-    const response = await request(
+    const response = await this.send(
       url,
       { method: "POST", body, headers: { accept: "application/json" } },
-      { ...this.requestOptions, label },
+      label,
     );
     return this.readJson(response, label);
+  }
+
+  private async send(url: string, init: RequestInit, label: string): Promise<Response> {
+    try {
+      return await request(url, init, { ...this.requestOptions, label });
+    } catch (error) {
+      throw explainConnectionFailure(error, label);
+    }
   }
 
   private async readJson(response: Response, label: string): Promise<unknown> {

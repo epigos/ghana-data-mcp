@@ -470,6 +470,52 @@ describe("gss_get_data", () => {
     expect(calls).toHaveLength(0);
   });
 
+  // The first real test run hit this: local `wrangler dev` cannot negotiate StatsBank's
+  // CBC-only TLS 1.2, and the generic message told the user to retry, which can never
+  // work there. A connection-level failure has to name the cause and the workaround.
+  it("explains a connection failure instead of advising a pointless retry", async () => {
+    const { fetch: fetchImpl } = stubFetch([
+      {
+        match: "fuel.px",
+        responses: [
+          () => {
+            throw new TypeError("Network connection lost.");
+          },
+        ],
+      },
+    ]);
+
+    const server = new McpServer({ name: "test", version: "0.0.0" });
+    registerGssTools(server, {
+      client: new GssClient({ fetchImpl, baseDelayMs: 0, retries: 0 }),
+      cache: createCache(createMemoryKV()),
+    });
+    const client = new Client({ name: "test-client", version: "0.0.0" });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await Promise.all([client.connect(ct), server.connect(st)]);
+
+    const result = await call(client, "gss_get_data", { table: "fuel", latest: 1 });
+    const text = result.content[0]?.text ?? "";
+
+    expect(result.isError).toBe(true);
+    expect(text).toMatch(/TLS 1\.2 with CBC ciphers/);
+    expect(text).toMatch(/wrangler dev --remote/);
+    // The misleading advice must be gone.
+    expect(text).not.toMatch(/usually transient/);
+  });
+
+  it("leaves a failure that did get an HTTP response described as it was", async () => {
+    // A 503 is a genuine upstream fault, not the TLS problem, so it keeps the normal
+    // retryable wording and must not gain the cipher explanation.
+    const { client } = await harness({
+      dataResponses: [() => errorResponse(503), () => errorResponse(503)],
+    });
+    const text = (await call(client, "gss_get_data", { table: "fuel", latest: 1 })).content[0]?.text ?? "";
+
+    expect(text).toMatch(/503/);
+    expect(text).not.toMatch(/CBC ciphers/);
+  });
+
   it("surfaces an upstream failure as a tool error", async () => {
     // 503 is retryable and the client is configured for one retry, so both attempts
     // have to fail for the error to reach the caller.
