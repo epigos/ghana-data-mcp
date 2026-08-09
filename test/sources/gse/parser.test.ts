@@ -192,6 +192,7 @@ describe("parseHistoryPayload", () => {
       close: 7, // Closing Price VWAP (col 8)
       change: 0.02, // Price Change (col 9)
       volume: 903_387, // Total Shares Traded (col 12)
+      valueTraded: 6_323_717.1, // Total Value Traded (col 13)
     });
   });
 

@@ -36,10 +36,38 @@ export const HISTORY_COLUMNS = {
   close: 8,
   change: 9,
   volume: 12,
+  valueTraded: 13,
 } as const;
 
-/** Highest index we read; a shorter row cannot be a price row. */
+/**
+ * Highest index we *require*; a shorter row cannot be a price row.
+ *
+ * Deliberately still 13, not 14, even though `valueTraded` reads index 13. That
+ * field is optional: raising this to 14 would start discarding any row GSE happens
+ * to send short, which would silently shrink results from a tool that works today.
+ * A missing index 13 simply yields `undefined`, and the field is omitted.
+ */
 const MIN_ROW_LENGTH = 13;
+
+/**
+ * Strips GSE's own annotation markers off a share code.
+ *
+ * The price table stores some codes decorated — `**ALW**` and `PBC**` are both
+ * live examples — while the company directory lists them plain. Grouping rows by
+ * the raw string would split one security in two, so everything downstream
+ * compares normalized codes.
+ *
+ * Only leading and trailing markers are removed. Interior spaces and dots survive,
+ * because `SCB PREF` is a genuinely different security from `SCB` and collapsing
+ * them would merge a preference share into an ordinary one.
+ */
+export function normalizeShareCode(raw: string): string {
+  return raw
+    .trim()
+    .toUpperCase()
+    .replace(/^[*#†\s]+/, "")
+    .replace(/[*#†\s]+$/, "");
+}
 
 /**
  * Column indices for the listed-companies tables (34 main market, 35 ETFs,
@@ -224,7 +252,7 @@ export function parseHistoryPayload(
   options: ParseHistoryOptions = {},
 ): ParsedHistory {
   const data = extractDataArray(payload);
-  const wanted = options.symbol?.trim().toUpperCase();
+  const wanted = options.symbol ? normalizeShareCode(options.symbol) : undefined;
 
   const rows: StockPriceRow[] = [];
   let skipped = 0;
@@ -242,7 +270,8 @@ export function parseHistoryPayload(
       skipped++;
       continue;
     }
-    if (wanted && symbol.toUpperCase() !== wanted) continue; // filtered, not malformed
+    // Both sides normalized, so a request for `ALW` matches the stored `**ALW**`.
+    if (wanted && normalizeShareCode(symbol) !== wanted) continue; // filtered, not malformed
 
     const date = parseDayFirstDate(raw[HISTORY_COLUMNS.date]);
     if (!date) {
@@ -264,15 +293,20 @@ export function parseHistoryPayload(
       continue;
     }
 
+    // Optional, and kept out of the all-or-nothing check above on purpose: a blank
+    // turnover cell must not cost the caller the rest of the row.
+    const valueTraded = parseNumber(raw[HISTORY_COLUMNS.valueTraded]);
+
     rows.push({
       date,
-      symbol,
+      symbol: normalizeShareCode(symbol),
       high: numbers.high as number,
       low: numbers.low as number,
       open: numbers.open as number,
       close: numbers.close as number,
       change: numbers.change as number,
       volume: numbers.volume as number,
+      ...(valueTraded !== null ? { valueTraded } : {}),
     });
   }
 
@@ -453,7 +487,7 @@ export function extractSymbols(payload: unknown): string[] {
   for (const raw of extractDataArray(payload)) {
     if (!Array.isArray(raw)) continue;
     const symbol = raw[HISTORY_COLUMNS.symbol];
-    if (typeof symbol === "string" && symbol.trim()) symbols.add(symbol.trim());
+    if (typeof symbol === "string" && symbol.trim()) symbols.add(normalizeShareCode(symbol));
   }
   return [...symbols].sort();
 }

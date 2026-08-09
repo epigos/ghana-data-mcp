@@ -21,6 +21,10 @@ const etfPayload = fixtureJson("companies-etf.json");
 const gaxPayload = fixtureJson("companies-gax.json");
 const marketIndexPayload = fixtureJson("market-index.json");
 const fixedIncomePayload = fixtureJson("fixed-income-issuers.json");
+const marketHistoryPayload = fixtureJson("market-history-5d.json");
+
+/** The fixture covers 3-7 Aug 2026; pin the clock just after it. */
+const AFTER_FIXTURE = new Date("2026-08-08T12:00:00Z");
 
 interface Harness {
   client: Client;
@@ -44,6 +48,8 @@ async function harness(
     /** Responses for the GFIM issuer table (37). */
     fixedIncomeResponses?: Array<() => Response>;
     cache?: Cache;
+    /** Pins the clock so window trimming is deterministic. */
+    now?: Date;
   } = {},
 ): Promise<Harness> {
   const companies = options.companyResponses ?? {};
@@ -69,6 +75,7 @@ async function harness(
   registerGseTools(server, {
     client: new GseClient({ fetchImpl, baseDelayMs: 0, retries: 1 }),
     cache,
+    ...(options.now ? { now: () => options.now as Date } : {}),
   });
 
   const client = new Client({ name: "test-client", version: "0.0.0" });
@@ -98,6 +105,7 @@ describe("tool registration", () => {
       "gse_get_stock_history",
       "gse_list_companies",
       "gse_list_fixed_income_issuers",
+      "gse_rank_stocks",
       "gse_search_company",
     ]);
     // Namespacing is the convention that lets a second source coexist (plan §4).
@@ -510,5 +518,189 @@ describe("gse_search_company", () => {
     const payload = result.structuredContent as { matches: unknown[]; meta: { warning?: string } };
     expect(payload.matches).toEqual([]);
     expect(payload.meta.warning).toMatch(/gse_list_companies/);
+  });
+});
+
+interface RankPayload {
+  metric: string;
+  order: string;
+  days: number;
+  window: { startDate?: string; endDate?: string; sessions: number };
+  universe: { quoted: number; ranked: number; excluded: number };
+  rankings: Array<{
+    rank: number;
+    symbol: string;
+    name?: string;
+    percentReturn: number | null;
+    totalVolume: number;
+    tradingDays: number;
+    quotedDays: number;
+    startIsCarriedForward: boolean;
+    endIsCarriedForward: boolean;
+  }>;
+  excluded: Array<{ symbol: string; reason: string }>;
+  meta: { origin: string; warning?: string };
+}
+
+/** Ranking harness: the price table (39) serves the multi-company fixture. */
+const rankHarness = (over: Parameters<typeof harness>[0] = {}) =>
+  harness({ responses: [() => jsonResponse(marketHistoryPayload)], now: AFTER_FIXTURE, ...over });
+
+const rank = async (client: Client, args: Record<string, unknown> = {}) =>
+  (await client.callTool({ name: "gse_rank_stocks", arguments: args })) as {
+    isError?: boolean;
+    content: Array<{ text?: string }>;
+    structuredContent?: RankPayload;
+  };
+
+describe("gse_rank_stocks", () => {
+  it("ranks the whole market from one price-table request", async () => {
+    const { client } = await rankHarness();
+    const payload = (await rank(client)).structuredContent as RankPayload;
+
+    expect(payload.window.sessions).toBe(5);
+    expect(payload.rankings.length).toBeGreaterThan(0);
+    expect(payload.metric).toBe("percentReturn");
+    expect(payload.order).toBe("desc");
+  });
+
+  // The entire justification for this tool. If a second question re-fetches, it is
+  // just a slow loop wearing a different name.
+  it("answers a follow-up comparison without touching the network again", async () => {
+    const { client, calls } = await rankHarness();
+
+    await rank(client, {});
+    const afterFirst = calls();
+    await rank(client, { symbols: ["ACCESS", "ALLGH"], metric: "volume" });
+
+    expect(calls()).toBe(afterFirst);
+  });
+
+  it("excludes never-traded securities and names them in the warning", async () => {
+    const { client } = await rankHarness();
+    const payload = (await rank(client)).structuredContent as RankPayload;
+
+    const ranked = payload.rankings.map((entry) => entry.symbol);
+    expect(ranked).not.toContain("ALW");
+    expect(ranked).not.toContain("SAMBA");
+    expect(payload.excluded.some((entry) => entry.reason === "untraded")).toBe(true);
+    expect(payload.meta.warning).toMatch(/quoted but never traded/);
+  });
+
+  it("strips GSE's annotation markers from the codes it reports", async () => {
+    const { client } = await rankHarness();
+    const payload = (await rank(client, { minTradingDays: 0 })).structuredContent as RankPayload;
+
+    const ranked = payload.rankings.map((entry) => entry.symbol);
+    expect(ranked).toContain("ALW");
+    expect(ranked.some((code) => code.includes("*"))).toBe(false);
+  });
+
+  it("resolves a company name to its share code", async () => {
+    const { client } = await rankHarness();
+    const payload = (await rank(client, { symbols: ["access bank"] })).structuredContent as RankPayload;
+
+    expect(payload.rankings.map((entry) => entry.symbol)).toEqual(["ACCESS"]);
+  });
+
+  it("returns a named security even when it never traded", async () => {
+    const { client } = await rankHarness();
+    const payload = (await rank(client, { symbols: ["ACCESS", "ALW"] })).structuredContent as RankPayload;
+
+    expect(payload.rankings.map((entry) => entry.symbol).sort()).toEqual(["ACCESS", "ALW"]);
+    expect(payload.excluded).toEqual([]);
+  });
+
+  it("warns rather than fails when only some names resolve", async () => {
+    const { client } = await rankHarness();
+    const result = await rank(client, { symbols: ["ACCESS", "!!!"] });
+    const payload = result.structuredContent as RankPayload;
+
+    expect(result.isError).toBeFalsy();
+    expect(payload.rankings.map((entry) => entry.symbol)).toEqual(["ACCESS"]);
+    expect(payload.meta.warning).toMatch(/!!!/);
+  });
+
+  it("errors and points at the search tool when nothing resolves", async () => {
+    const { client } = await rankHarness();
+    const result = await rank(client, { symbols: ["!!!", "???"] });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toMatch(/gse_search_company/);
+  });
+
+  it("inverts the ranking under asc, surfacing the biggest faller", async () => {
+    const { client } = await rankHarness();
+    const payload = (await rank(client, { order: "asc" })).structuredContent as RankPayload;
+
+    // ALLGH ran 6.37 -> 5.43 across the window, the sharpest move present.
+    expect(payload.rankings[0]?.symbol).toBe("ALLGH");
+    expect(payload.rankings[0]?.percentReturn).toBeCloseTo(-14.76, 1);
+  });
+
+  it("ranks by volume with no ties at zero", async () => {
+    const { client } = await rankHarness();
+    const payload = (await rank(client, { metric: "volume" })).structuredContent as RankPayload;
+
+    expect(payload.rankings.every((entry) => entry.totalVolume > 0)).toBe(true);
+  });
+
+  it("flags a result whose opening price was carried forward", async () => {
+    const { client } = await rankHarness();
+    const payload = (await rank(client, { symbols: ["BOPP"] })).structuredContent as RankPayload;
+
+    expect(payload.rankings[0]).toMatchObject({ startIsCarriedForward: true, tradingDays: 3 });
+    expect(payload.meta.warning).toMatch(/had not traded at the start of the window/);
+  });
+
+  it("labels results with company names from the directory", async () => {
+    const { client } = await rankHarness();
+    const payload = (await rank(client, { symbols: ["ACCESS"] })).structuredContent as RankPayload;
+
+    expect(payload.rankings[0]?.name).toBeTruthy();
+  });
+
+  it("reports a truncated window instead of ranking on partial data", async () => {
+    const truncated = { ...(marketHistoryPayload as object), recordsFiltered: "5000" };
+    const { client } = await rankHarness({ responses: [() => jsonResponse(truncated)] });
+    const payload = (await rank(client)).structuredContent as RankPayload;
+
+    expect(payload.meta.warning).toMatch(/incomplete/);
+  });
+
+  // The warning lives inside the cached value, so it must outlive the fetch.
+  it("keeps the truncation warning on a cache hit", async () => {
+    const truncated = { ...(marketHistoryPayload as object), recordsFiltered: "5000" };
+    const { client } = await rankHarness({ responses: [() => jsonResponse(truncated)] });
+
+    await rank(client);
+    const payload = (await rank(client)).structuredContent as RankPayload;
+
+    expect(payload.meta.origin).toBe("cache");
+    expect(payload.meta.warning).toMatch(/incomplete/);
+  });
+
+  it("shares one cached bucket across windows that quantize together", async () => {
+    const { client, calls } = await rankHarness();
+
+    await rank(client, { days: 30 });
+    const afterFirst = calls();
+    await rank(client, { days: 25 }); // same 30-day bucket
+    expect(calls()).toBe(afterFirst);
+  });
+
+  it("rejects a window longer than the tool supports", async () => {
+    const { client } = await rankHarness();
+    expect((await rank(client, { days: 5000 })).isError).toBe(true);
+  });
+
+  it("reports an upstream failure as a tool error", async () => {
+    const { client } = await rankHarness({
+      responses: [() => errorResponse(503), () => errorResponse(503)],
+    });
+    const result = await rank(client);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toMatch(/503/);
   });
 });

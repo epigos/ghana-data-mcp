@@ -7,6 +7,7 @@ import {
   parseHistoryPayload,
   parseMarketIndexPayload,
 } from "../../src/sources/gse/parser.js";
+import { rankStocks, summarizeWindow } from "../../src/sources/gse/ranking.js";
 
 /**
  * Live smoke test against gse.com.gh — the canary for upstream markup changes
@@ -113,4 +114,55 @@ describe.skipIf(!live)("gse.com.gh (live)", () => {
     expect(Array.isArray(payload.data)).toBe(true);
     for (const row of payload.data) expect(row).toHaveLength(14);
   }, 45_000);
+
+  /**
+   * The premise the whole ranking tool rests on: one unfiltered query on table 39
+   * returns the entire exchange. If GSE ever starts paging this or filtering it
+   * server-side, gse_rank_stocks silently starts ranking a subset — so this asserts
+   * the row count matches what upstream says matched, not just that rows arrived.
+   */
+  it("still returns every listed security from one unfiltered price query", async () => {
+    const payload = (await client.fetchMarketHistory({ days: 30 })) as {
+      data: unknown[];
+      recordsFiltered: string;
+    };
+    const { rows } = parseHistoryPayload(payload);
+    const summary = summarizeWindow(rows);
+
+    expect(payload.data.length).toBe(Number(payload.recordsFiltered)); // not truncated
+    expect(summary.symbols.length).toBeGreaterThan(30);
+    expect(summary.sessions).toBeGreaterThan(10);
+  }, 60_000);
+
+  /**
+   * The assumption behind excluding untraded securities by default. If this ever
+   * fails, GSE changed how it publishes dormant securities and the default needs
+   * revisiting — which is exactly what a canary is for.
+   */
+  it("still publishes rows for securities that did not trade", async () => {
+    const { rows } = parseHistoryPayload(await client.fetchMarketHistory({ days: 30 }));
+    const summary = summarizeWindow(rows);
+
+    const dormant = summary.symbols.filter((entry) => entry.tradingDays === 0);
+    expect(dormant.length).toBeGreaterThan(0);
+    expect(dormant.every((entry) => entry.totalVolume === 0)).toBe(true);
+
+    // And the default filter really removes them.
+    const ranked = rankStocks(summary, {
+      metric: "percentReturn",
+      order: "desc",
+      limit: 50,
+      minTradingDays: 1,
+    });
+    expect(ranked.rankings.every((entry) => entry.tradingDays > 0)).toBe(true);
+    expect(ranked.excluded.some((entry) => entry.reason === "untraded")).toBe(true);
+  }, 60_000);
+
+  it("still populates the turnover column this source now reads", async () => {
+    const { rows } = parseHistoryPayload(await client.fetchMarketHistory({ days: 7 }));
+    const traded = rows.filter((row) => row.volume > 0);
+
+    expect(traded.length).toBeGreaterThan(0);
+    expect(traded.some((row) => typeof row.valueTraded === "number" && row.valueTraded > 0)).toBe(true);
+  }, 60_000);
 });

@@ -28,7 +28,11 @@ export function createServer(env: Env): McpServer {
         "Public Ghana data. Tools are namespaced by source. `gse_*` covers the Ghana Stock " +
         "Exchange: company directory, daily share prices, market index and fixed-income " +
         "issuers. Share codes are required for price lookups — resolve a company name with " +
-        "gse_search_company first. `bog_*` covers Bank of Ghana treasury data: interbank FX " +
+        "gse_search_company first. To rank or compare companies by performance use " +
+        "gse_rank_stocks, which covers the whole exchange in one request; never loop " +
+        "gse_get_stock_history over symbols to build a comparison. GSE publishes a row for " +
+        "every listed security every trading day whether or not it traded, so zero volume " +
+        "means quoted-but-untraded rather than missing data. `bog_*` covers Bank of Ghana treasury data: interbank FX " +
         "rates, Treasury and central-bank bill rates, and interbank money-market rates. " +
         "`imf_*` covers IMF macroeconomic indicators for Ghana — resolve a name to a code with " +
         "imf_list_indicators first, and always flag IMF's own forward projections as such. " +

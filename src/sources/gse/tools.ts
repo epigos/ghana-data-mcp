@@ -16,21 +16,40 @@ import {
   type CompanyDirectory,
 } from "./companies.js";
 import {
+  normalizeShareCode,
   parseFixedIncomeIssuersPayload,
   parseHistoryPayload,
   parseMarketIndexPayload,
 } from "./parser.js";
 import {
+  rankStocks,
+  summarizeWindow,
+  trimToWindow,
+  windowBucket,
+  windowStartDate,
+} from "./ranking.js";
+import {
   CompanyMatchSchema,
   CompanySchema,
   DEFAULT_HISTORY_DAYS,
+  DEFAULT_MIN_TRADING_DAYS,
+  DEFAULT_RANK_DAYS,
+  DEFAULT_RANK_LIMIT,
   FixedIncomeIssuerSchema,
   MARKET_LABELS,
   MarketIndexRowSchema,
   MarketSchema,
   MAX_HISTORY_DAYS,
+  MAX_RANK_DAYS,
+  MAX_RANK_LIMIT,
+  MAX_RANK_SYMBOLS,
+  RankedStockSchema,
+  RankExclusionSchema,
+  RankMetricSchema,
+  RankOrderSchema,
   StockPriceRowSchema,
   type Company,
+  type StockPriceRow,
 } from "./types.js";
 
 /** GFIM admissions change a few times a year at most. */
@@ -147,6 +166,229 @@ export function registerGseTools(server: McpServer, deps: GseDeps): void {
         });
       } catch (error) {
         log.error("tool: gse_get_stock_history failed", { reason: describeError(error) });
+        return toolError(describeError(error));
+      }
+    },
+  );
+
+  server.registerTool(
+    "gse_rank_stocks",
+    {
+      title: "Rank or compare GSE stocks by performance",
+      description:
+        "Ranks every security on the Ghana Stock Exchange by performance over a window, or " +
+        "compares a named basket. Use this for \"best performing stocks\", \"biggest fallers\", " +
+        "\"most actively traded\", or any comparison of two or more companies — it covers the " +
+        "whole exchange in ONE request, so never loop gse_get_stock_history over symbols to " +
+        "build a comparison yourself. Sort by percentReturn (default), priceChange, volume or " +
+        "valueTraded; every one of those is reported for every result regardless of which you " +
+        "sort by. Prices are Ghana cedis (GHS). IMPORTANT: GSE publishes a row for every listed " +
+        "security every trading day whether or not it traded, carrying the last close forward " +
+        "when it did not — so securities that never traded in the window are excluded by " +
+        "default, and any result where tradingDays is below quotedDays has a return resting " +
+        "partly on a stale price. Check startIsCarriedForward before describing a move as " +
+        "having happened during the window.",
+      inputSchema: {
+        days: z
+          .number()
+          .int()
+          .min(2)
+          .max(MAX_RANK_DAYS)
+          .optional()
+          .describe(
+            `Calendar days to measure over. Default ${DEFAULT_RANK_DAYS}, which is about 21 ` +
+              `trading sessions. Maximum ${MAX_RANK_DAYS}; for anything longer use ` +
+              "gse_get_stock_history on the specific symbols you care about.",
+          ),
+        symbols: z
+          .array(z.string().min(1))
+          .min(1)
+          .max(MAX_RANK_SYMBOLS)
+          .optional()
+          .describe(
+            "Restrict to these securities — share codes (\"GCB\") or company names " +
+              "(\"ecobank\"), case-insensitive. Omit to rank the entire exchange, which costs " +
+              "exactly the same one request. Anything named here is always returned, even if it " +
+              "never traded, so a comparison never silently drops one of its subjects.",
+          ),
+        metric: RankMetricSchema.optional().describe(
+          "Sort key. Default percentReturn. Every metric is computed for every result either way.",
+        ),
+        order: RankOrderSchema.optional().describe(
+          "desc (default) = best first. asc = worst first, for \"which stocks fell the most\".",
+        ),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_RANK_LIMIT)
+          .optional()
+          .describe(
+            `How many to return when ranking the whole market. Default ${DEFAULT_RANK_LIMIT}. ` +
+              "Ignored when `symbols` is given — a basket always comes back whole.",
+          ),
+        minTradingDays: z
+          .number()
+          .int()
+          .min(0)
+          .max(MAX_RANK_DAYS)
+          .optional()
+          .describe(
+            `Minimum sessions a security must have actually traded on to enter a market-wide ` +
+              `ranking. Default ${DEFAULT_MIN_TRADING_DAYS}, which drops securities that were ` +
+              "quoted but never changed hands — including them would report ties at zero volume " +
+              "and 0.00% return. Raise it to filter thin trading; set 0 to see everything. Never " +
+              "applied to securities named in `symbols`.",
+          ),
+      },
+      outputSchema: {
+        metric: RankMetricSchema,
+        order: RankOrderSchema,
+        days: z.number(),
+        window: z.object({
+          startDate: z.string().optional(),
+          endDate: z.string().optional(),
+          sessions: z.number().int().describe("Trading sessions GSE published in the window."),
+        }),
+        universe: z.object({
+          quoted: z.number().int().describe("Securities quoted in the window, before filtering."),
+          ranked: z.number().int(),
+          excluded: z.number().int(),
+        }),
+        rankings: z.array(RankedStockSchema),
+        excluded: z
+          .array(RankExclusionSchema)
+          .describe(
+            "Securities left out and why. Worth reporting — \"quoted but nobody traded it\" is a " +
+              "different answer from \"no data\".",
+          ),
+        meta: ResultMetaSchema,
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ days, symbols, metric, order, limit, minTradingDays }) => {
+      const requestedDays = days ?? DEFAULT_RANK_DAYS;
+      const chosenMetric = metric ?? "percentReturn";
+      const chosenOrder = order ?? "desc";
+
+      log.info("tool: gse_rank_stocks", {
+        days: requestedDays,
+        metric: chosenMetric,
+        order: chosenOrder,
+        symbols: symbols?.length ?? 0,
+      });
+
+      try {
+        const warnings: string[] = [];
+
+        // The directory serves two jobs: resolving a caller's names to share codes,
+        // and labelling the results. It is cached for a week and has a static seed,
+        // so a failure here degrades to codes-only rather than failing the ranking.
+        const directory = await loadCompanies(deps, {});
+        const names = new Map(
+          directory.companies.map((company) => [normalizeShareCode(company.symbol), company.name]),
+        );
+
+        let resolved: string[] | undefined;
+        if (symbols && symbols.length > 0) {
+          const unresolved: string[] = [];
+          const codes = new Set<string>();
+
+          for (const raw of symbols) {
+            const code = resolveShareCode(raw, directory.companies);
+            if (code) codes.add(code);
+            else unresolved.push(raw);
+          }
+
+          if (codes.size === 0) {
+            return toolError(
+              `None of these matched a listed security: ${unresolved.join(", ")}. Use ` +
+                "gse_search_company to find the right share code.",
+            );
+          }
+          if (unresolved.length > 0) {
+            warnings.push(
+              `These were not recognized and were skipped: ${unresolved.join(", ")}. Use ` +
+                "gse_search_company to find the right share code.",
+            );
+          }
+          resolved = [...codes].sort();
+        }
+
+        // Cached by bucket, not by the exact `days`, so 30 and 31 do not become two
+        // separate scrapes of someone else's site. The wider bucket is trimmed to the
+        // requested window below.
+        const bucket = windowBucket(requestedDays);
+        const key = `gse:market-history:v1:${bucket}`;
+        const ttl = historyTtlSeconds(now());
+        log.debug("cache: lookup", { key, ttlSeconds: ttl, bucket });
+
+        const result = await readThrough(deps.cache, key, ttl, async () => {
+          const payload = await deps.client.fetchMarketHistory({ days: bucket });
+          const parsed = parseHistoryPayload(payload);
+          // Truncation has to be recorded here, inside the cached value: a warning
+          // logged at fetch time would not survive a cache hit, and a truncated
+          // window silently shifts startClose for every security at once.
+          return { ...parsed, truncation: detectTruncation(payload) };
+        });
+
+        const { rows: allRows, skipped, truncation } = result.value;
+        const rows: StockPriceRow[] = trimToWindow(
+          allRows,
+          windowStartDate(requestedDays, now()),
+        );
+
+        const summary = summarizeWindow(rows);
+        const ranked = rankStocks(summary, {
+          metric: chosenMetric,
+          order: chosenOrder,
+          limit: limit ?? DEFAULT_RANK_LIMIT,
+          minTradingDays: minTradingDays ?? DEFAULT_MIN_TRADING_DAYS,
+          names,
+          ...(resolved ? { symbols: resolved } : {}),
+        });
+
+        warnings.push(...rankingWarnings(summary, ranked, truncation, directory.meta.warning));
+
+        log.info("tool: gse_rank_stocks done", {
+          quoted: ranked.quoted,
+          ranked: ranked.rankings.length,
+          excluded: ranked.excluded.length,
+          sessions: summary.sessions,
+          origin: result.origin,
+        });
+
+        if (result.origin === "stale-cache") {
+          warnings.unshift(
+            `gse.com.gh could not be reached (${result.staleReason}); serving cached prices from ${Math.round(result.ageSeconds / 3600)} hour(s) ago.`,
+          );
+        }
+
+        return toolResult({
+          metric: chosenMetric,
+          order: chosenOrder,
+          days: requestedDays,
+          window: {
+            ...(summary.startDate ? { startDate: summary.startDate } : {}),
+            ...(summary.endDate ? { endDate: summary.endDate } : {}),
+            sessions: summary.sessions,
+          },
+          universe: {
+            quoted: ranked.quoted,
+            ranked: ranked.rankings.length,
+            excluded: ranked.excluded.length,
+          },
+          rankings: ranked.rankings,
+          excluded: ranked.excluded,
+          meta: {
+            origin: result.origin as DataOrigin,
+            ageSeconds: result.ageSeconds,
+            skippedRows: skipped,
+            ...(warnings.length > 0 ? { warning: warnings.join(" ") } : {}),
+          },
+        });
+      } catch (error) {
+        log.error("tool: gse_rank_stocks failed", { reason: describeError(error) });
         return toolError(describeError(error));
       }
     },
@@ -400,6 +642,140 @@ export function registerGseTools(server: McpServer, deps: GseDeps): void {
  * share codes still lets a caller look up prices; a tool error would leave them
  * with nothing.
  */
+/**
+ * Resolves one caller-supplied token to a share code.
+ *
+ * An exact code match wins outright. Failing that the directory's own fuzzy search
+ * runs — it already carries the alias table (`mtn` → MTNGH, `stanchart` → SCB), so
+ * a caller can write a company name and skip the gse_search_company round trip that
+ * this whole tool exists to remove.
+ *
+ * The 0.6 floor is `searchCompanies`' "the query appears in the company name" tier,
+ * which admits "access bank" → ACCESS. Everything below it is guesswork not worth
+ * acting on unprompted: a coincidental substring of a share code scores 0.5, and the
+ * bigram fallback can never exceed 0.5.
+ *
+ * An unmatched but plausible-looking code is passed through rather than rejected —
+ * the directory can lag a new listing, and the price table is the fresher source. If
+ * it really does not exist, it simply ranks nothing and the caller is told.
+ */
+function resolveShareCode(raw: string, companies: readonly Company[]): string | undefined {
+  const normalized = normalizeShareCode(raw);
+  if (!normalized) return undefined;
+
+  if (companies.some((company) => normalizeShareCode(company.symbol) === normalized)) {
+    return normalized;
+  }
+
+  const [best] = searchCompanies(companies, raw, 1);
+  if (best && best.score >= 0.6) return normalizeShareCode(best.symbol);
+
+  return /^[A-Z0-9][A-Z0-9 .-]*$/.test(normalized) ? normalized : undefined;
+}
+
+interface Truncation {
+  truncated: boolean;
+  rows?: number;
+  recordsFiltered?: number;
+}
+
+/**
+ * wpDataTables reports how many rows matched before paging. Fewer rows than that
+ * means the window is incomplete, which for a ranking is far more damaging than for
+ * a single-symbol history: it moves `startClose` for every security at once.
+ */
+function detectTruncation(payload: unknown): Truncation {
+  if (!payload || typeof payload !== "object") return { truncated: false };
+  const body = payload as { data?: unknown; recordsFiltered?: unknown };
+  const rows = Array.isArray(body.data) ? body.data.length : undefined;
+  const recordsFiltered = Number(body.recordsFiltered);
+
+  if (rows === undefined || !Number.isFinite(recordsFiltered)) return { truncated: false };
+  return { truncated: rows < recordsFiltered, rows, recordsFiltered };
+}
+
+/** Caps a symbol list so one warning cannot swamp the response. */
+function nameList(symbols: readonly string[], max = 5): string {
+  if (symbols.length <= max) return symbols.join(", ");
+  return `${symbols.slice(0, max).join(", ")} and ${symbols.length - max} more`;
+}
+
+/**
+ * Everything a reader needs to know before quoting one of these figures. The
+ * carried-forward warnings deliberately only fire for securities that are actually
+ * in `rankings` — warning about rows the caller cannot see is noise.
+ */
+function rankingWarnings(
+  summary: ReturnType<typeof summarizeWindow>,
+  ranked: ReturnType<typeof rankStocks>,
+  truncation: Truncation,
+  directoryWarning: string | undefined,
+): string[] {
+  const warnings: string[] = [];
+
+  if (truncation.truncated) {
+    warnings.push(
+      `gse.com.gh returned ${truncation.rows} of ${truncation.recordsFiltered} matching rows, so ` +
+        "this window is incomplete and the ranking may be wrong. Ask for fewer days.",
+    );
+  }
+
+  if (summary.sessions <= 1) {
+    warnings.push(
+      `This window contains only ${summary.sessions} trading session(s), so every return is ` +
+        "0.00%. Ask for more days.",
+    );
+  }
+
+  const untraded = ranked.excluded.filter((entry) => entry.reason === "untraded");
+  if (untraded.length > 0) {
+    warnings.push(
+      `${untraded.length} securit${untraded.length === 1 ? "y was" : "ies were"} quoted but never ` +
+        `traded in this window and ${untraded.length === 1 ? "is" : "are"} not ranked: ` +
+        `${nameList(untraded.map((entry) => entry.symbol))}. GSE publishes a row for every listed ` +
+        "security whether or not it changed hands.",
+    );
+  }
+
+  const thin = ranked.excluded.filter((entry) => entry.reason === "too-few-trading-days");
+  if (thin.length > 0) {
+    warnings.push(
+      `${nameList(thin.map((entry) => entry.symbol))} traded on fewer sessions than ` +
+        "minTradingDays and were not ranked.",
+    );
+  }
+
+  const noBaseline = ranked.excluded.filter((entry) => entry.reason === "no-baseline-price");
+  if (noBaseline.length > 0) {
+    warnings.push(
+      `${nameList(noBaseline.map((entry) => entry.symbol))} opened the window at zero, so no ` +
+        "percentage return could be computed.",
+    );
+  }
+
+  const staleStart = ranked.rankings.filter((entry) => entry.startIsCarriedForward);
+  if (staleStart.length > 0) {
+    warnings.push(
+      `${nameList(staleStart.map((entry) => entry.symbol))} had not traded at the start of the ` +
+        "window, so the move shown may have happened before it rather than during it.",
+    );
+  }
+
+  const staleEnd = ranked.rankings.filter(
+    (entry) => entry.endIsCarriedForward && !entry.startIsCarriedForward,
+  );
+  if (staleEnd.length > 0) {
+    warnings.push(
+      `${nameList(staleEnd.map((entry) => entry.symbol))} did not trade on the last session, so ` +
+        "the closing price is carried forward — see lastTradedDate.",
+    );
+  }
+
+  if (directoryWarning) warnings.push(directoryWarning);
+
+  return warnings;
+}
+
 async function loadCompanies(
   deps: GseDeps,
   options: { refresh?: boolean },

@@ -8,7 +8,7 @@ import {
   summarizeTablePayload,
   type TableSession,
 } from "../../lib/wpDataTables.js";
-import { MAX_HISTORY_DAYS, type Market } from "./types.js";
+import { MAX_HISTORY_DAYS, MAX_RANK_DAYS, type Market } from "./types.js";
 
 // gse.com.gh exposes its table nonces as wdtNonceFrontendEdit_<id>.
 const GSE_NONCE_FLAVOUR = "frontendEdit" as const;
@@ -276,6 +276,42 @@ export class GseClient {
       // At most ~5 trading days per calendar week, so `days` is always a
       // generous upper bound on the row count for the window.
       length: Math.min(10_000, Math.max(100, boundedDays)),
+      orderColumn: 1,
+      orderDir: "desc",
+    });
+  }
+
+  /**
+   * Every listed security's daily prices for a window, in ONE request.
+   *
+   * Identical to `fetchStockHistory` minus the column-2 share-code search. Table 39
+   * is a single flat table of every security × every trading day, so dropping that
+   * one filter returns the whole exchange: verified live at 861 rows across 41
+   * share codes for 30 days, and 10,671 rows untruncated for 400.
+   *
+   * That is what makes a market-wide ranking cost the same as looking up one stock,
+   * and why `gse_rank_stocks` must never be implemented as a loop over
+   * `fetchStockHistory`.
+   */
+  async fetchMarketHistory({ days }: { days: number }): Promise<unknown> {
+    const boundedDays = Math.min(Math.max(Math.round(days), 1), MAX_RANK_DAYS);
+    this.logger.info("gse: fetching market-wide history", { days: boundedDays });
+
+    const session = await this.createSession(PAGES.tradingAndData, [TABLE_IDS.dailyPrices]);
+
+    return this.fetchTable({
+      tableId: TABLE_IDS.dailyPrices,
+      session,
+      pagePath: PAGES.tradingAndData,
+      columnNames: PRICE_COLUMN_NAMES,
+      rangeSeparator: "|",
+      columnSearches: {
+        1: { value: dateRange(boundedDays), regex: false },
+      },
+      // ~29 rows per calendar day observed (41 securities across ~5 sessions per 7
+      // days). 60/day is over 2x headroom, so hitting this ceiling means the listed
+      // universe grew a lot — and `fetchTable` already warns on truncation.
+      length: Math.min(30_000, Math.max(2_000, boundedDays * 60)),
       orderColumn: 1,
       orderDir: "desc",
     });

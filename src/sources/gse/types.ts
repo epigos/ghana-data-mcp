@@ -21,7 +21,14 @@ export const StockPriceRowSchema = z.object({
   open: z.number().describe("Opening price for the day, in GHS."),
   close: z.number().describe("Closing price for the day (VWAP), in GHS."),
   change: z.number().describe("Price change versus the previous close, in GHS. May be negative."),
-  volume: z.number().describe("Total shares traded that day."),
+  volume: z.number().describe("Total shares traded that day. Zero means the security was quoted but did not trade."),
+  valueTraded: z
+    .number()
+    .optional()
+    .describe(
+      "Turnover that day in GHS (shares traded x price). Omitted when GSE published no " +
+        "figure — never read an absent value as zero.",
+    ),
 });
 export type StockPriceRow = z.infer<typeof StockPriceRowSchema>;
 
@@ -126,3 +133,108 @@ export type CompanyMatch = z.infer<typeof CompanyMatchSchema>;
  */
 export const MAX_HISTORY_DAYS = 7300;
 export const DEFAULT_HISTORY_DAYS = 90;
+
+/**
+ * What `gse_rank_stocks` sorts by. Every metric is computed for every returned
+ * security regardless — they all come from the same rows — so this only picks the
+ * sort key, never what is measured.
+ */
+export const RANK_METRICS = ["percentReturn", "priceChange", "volume", "valueTraded"] as const;
+export const RankMetricSchema = z.enum(RANK_METRICS);
+export type RankMetric = z.infer<typeof RankMetricSchema>;
+
+export const RankOrderSchema = z.enum(["desc", "asc"]);
+export type RankOrder = z.infer<typeof RankOrderSchema>;
+
+export const DEFAULT_RANK_DAYS = 30;
+/**
+ * Deliberately far below `MAX_HISTORY_DAYS`. A ranking query is unfiltered by share
+ * code, so a 20-year window would pull most of a 184,000-row table on every cache
+ * miss. 400 days is the largest window measured to come back untruncated (10,671
+ * rows) and covers any plausible "best performing" question; longer windows belong
+ * to gse_get_stock_history on a named symbol.
+ */
+export const MAX_RANK_DAYS = 400;
+export const DEFAULT_RANK_LIMIT = 10;
+export const MAX_RANK_LIMIT = 50;
+/** Roughly the whole listed universe, so a basket can name every security if it wants. */
+export const MAX_RANK_SYMBOLS = 40;
+export const DEFAULT_MIN_TRADING_DAYS = 1;
+
+/** Why a security was quoted in the window but left out of the ranking. */
+export const RankExclusionSchema = z.object({
+  symbol: z.string(),
+  reason: z
+    .enum(["untraded", "too-few-trading-days", "no-baseline-price"])
+    .describe(
+      "untraded = quoted every session but never changed hands; too-few-trading-days = it " +
+        "traded, but on fewer sessions than minTradingDays; no-baseline-price = its first " +
+        "close was zero, so a percentage return is undefined.",
+    ),
+});
+export type RankExclusion = z.infer<typeof RankExclusionSchema>;
+
+/**
+ * One security's performance over the requested window.
+ *
+ * The liquidity fields are not decoration. GSE publishes a row for every listed
+ * security every trading day whether or not it traded, carrying the last close
+ * forward when it did not. So a return can be perfectly real arithmetic over two
+ * prices that are months apart. `tradingDays`, `lastTradedDate` and the two
+ * carried-forward flags are what let a reader tell those apart.
+ */
+export const RankedStockSchema = z.object({
+  rank: z.number().int().describe("1 is best under the chosen metric and order. Ties break by share code."),
+  symbol: z.string().describe("GSE share code, with GSE's own annotation markers stripped."),
+  name: z.string().optional().describe("Company name, when the directory could match the code."),
+
+  startDate: z
+    .string()
+    .describe(
+      "First session in the window this security was quoted on — later than the window start " +
+        "if it listed recently.",
+    ),
+  startClose: z.number().describe("Closing price on startDate, GHS."),
+  endDate: z.string().describe("Last session in the window it was quoted on."),
+  endClose: z.number().describe("Closing price on endDate, GHS."),
+
+  percentReturn: z
+    .number()
+    .nullable()
+    .describe("(endClose - startClose) / startClose x 100. Null when startClose was zero."),
+  priceChange: z
+    .number()
+    .nullable()
+    .describe("endClose - startClose, GHS. Not the sum of the daily `change` column."),
+  totalVolume: z.number().describe("Shares traded across the window."),
+  totalValueTraded: z
+    .number()
+    .optional()
+    .describe(
+      "Turnover across the window in GHS. Omitted rather than partially summed when GSE left " +
+        "the figure blank on any session that traded.",
+    ),
+
+  quotedDays: z.number().int().describe("Sessions GSE published a row for this security."),
+  tradingDays: z
+    .number()
+    .int()
+    .describe(
+      "Sessions it actually traded on (volume > 0). Lower than quotedDays is normal and means " +
+        "the price was carried forward on the difference.",
+    ),
+  lastTradedDate: z
+    .string()
+    .optional()
+    .describe("Most recent session with volume > 0. Absent means it never traded in the window."),
+  startIsCarriedForward: z
+    .boolean()
+    .describe(
+      "True when it did not trade on startDate, so startClose predates the window and the " +
+        "return may cover a move that happened before it.",
+    ),
+  endIsCarriedForward: z
+    .boolean()
+    .describe("True when it did not trade on endDate, so endClose is stale — see lastTradedDate."),
+});
+export type RankedStock = z.infer<typeof RankedStockSchema>;

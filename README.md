@@ -11,13 +11,14 @@ Streamable HTTP.
 
 ## Tools
 
-Fourteen tools, all read-only, namespaced by source.
+Fifteen tools, all read-only, namespaced by source.
 
 **Ghana Stock Exchange** — [full reference and sample queries](docs/GSE.md)
 
 | Tool | Returns |
 | ---- | ------- |
 | [`gse_get_stock_history`](docs/GSE.md#gse_get_stock_history) | Daily prices and volume for one share code, back to 2007 |
+| [`gse_rank_stocks`](docs/GSE.md#gse_rank_stocks) | Rank the whole exchange, or compare a basket, by return, price change, volume or turnover |
 | [`gse_list_companies`](docs/GSE.md#gse_list_companies) | Every listed company: share code, name, board, listing date |
 | [`gse_search_company`](docs/GSE.md#gse_search_company) | Best-matching companies for a name, with a confidence score |
 | [`gse_get_market_index`](docs/GSE.md#gse_get_market_index) | Market-wide GSE Composite Index, market cap, GSE-FSI, volume |
@@ -127,6 +128,8 @@ Confirm the connection with a question that fetches nothing:
 Then something real:
 
 > What has MTN Ghana's share price done this month?
+
+> What are the best performing stocks on the GSE right now?
 
 > What is the cedi trading at against the dollar?
 

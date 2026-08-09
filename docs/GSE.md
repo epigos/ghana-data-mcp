@@ -1,11 +1,12 @@
 # Ghana Stock Exchange (`gse_*`)
 
-Share prices, the listed-company directory, market-wide index history, and the
-fixed-income issuer list — scraped from [gse.com.gh](https://gse.com.gh). Five
-tools, all read-only.
+Share prices, performance rankings, the listed-company directory, market-wide
+index history, and the fixed-income issuer list — scraped from
+[gse.com.gh](https://gse.com.gh). Six tools, all read-only.
 
-Figures in this document were captured on **2026-07-25** and are there to show
-the shape of a response, not as current market data.
+Figures in this document were captured on **2026-07-25**, except the ranking
+examples which are from **2026-08-08**. They are there to show the shape of a
+response, not as current market data.
 
 Running the server and connecting a client are covered once in the
 [README](../README.md#connecting-an-mcp-client) — this guide assumes you are
@@ -66,18 +67,34 @@ the last element, since rows are **oldest first**.
 
 ### Comparison and analysis
 
+> **What are the best performing stocks on the GSE?**
+
+One `gse_rank_stocks` call. On 2026-08-08 the 30-day leaders were HORDS +292.9%,
+IIL +89.3% and CLYD +40.1%. Note the fourth and fifth places, DASPHARMA +26.8%
+and CPC +20.0%: both are flagged, because DASPHARMA traded on only 7 of the 21
+sessions and CPC's closing price is carried forward. That flagging is the point —
+see [a carried-forward close can move a return into the wrong
+window](#a-carried-forward-close-can-move-a-return-into-the-wrong-window).
+
 > **Compare GCB, Ecobank Ghana and TotalEnergies over the last 30 days. Which
 > performed best?**
 
-Three `gse_get_stock_history` calls. On 2026-07-25 this gave roughly +10.8%,
-+13.8% and +11.1% — Ecobank ahead. A good test that the model reads `close` from
-the first and last rows rather than trusting `high`/`low`.
+`gse_rank_stocks({ symbols: ["GCB", "ecobank", "total"] })` — one call, and the
+names resolve without a `gse_search_company` round trip first. On 2026-08-08 a
+30-day basket of EGH, MTNGH, GCB and ACCESS gave +14.7%, +7.9%, +1.4% and −0.03%.
 
-> **Which of the banks listed on the GSE had the highest trading volume yesterday?**
+> **Which stocks fell the hardest over the last quarter?**
 
-Needs the directory plus one history call per bank, so it is the most expensive
-query here — a reasonable check that the cache is working, since a second run
-should be near-instant and log no HTTP requests.
+`gse_rank_stocks({ days: 90, order: "asc" })`. On 2026-08-08: ALLGH −35.8%,
+RBGH −23.6%, GGBL −20.6%.
+
+> **Which of the banks listed on the GSE had the highest trading volume?**
+
+`gse_rank_stocks({ metric: "valueTraded" })` ranks by turnover in cedis, which is
+the fairer liquidity measure — ranking by share count alone floats penny stocks to
+the top. This used to need the directory plus one history call per bank; it is now
+a single request, and a second ranking over the same window is served from cache
+without touching gse.com.gh at all.
 
 > **Has MTN Ghana traded near its 52-week high recently?**
 
@@ -165,7 +182,8 @@ Each row:
   "open": 6.98,
   "close": 7,
   "change": 0.02,
-  "volume": 903387
+  "volume": 903387,
+  "valueTraded": 6323717.1
 }
 ```
 
@@ -178,8 +196,68 @@ Each row:
 | `close`  | Closing price that day (VWAP), GHS                                   |
 | `change` | Change against the previous close, GHS. Negative when the price fell |
 | `volume` | Shares traded that day. `0` means quoted but untraded                |
+| `valueTraded` | Turnover that day in GHS. Absent when GSE published none — not zero |
 
 `days` is a *calendar* window, so expect about 21 rows for 30 days.
+
+### `gse_rank_stocks`
+
+Ranks every security on the exchange over a window, or compares a named basket.
+**One upstream request either way** — the price table holds every security on
+every trading day, so a market-wide ranking costs exactly what looking up a single
+stock costs.
+
+| Input            | Type     | Notes                                                     |
+| ---------------- | -------- | --------------------------------------------------------- |
+| `days`           | number   | Calendar days to measure over. Default 30, min 2, max 400. |
+| `symbols`        | string[] | Share codes or company names. Omit to rank the whole market. |
+| `metric`         | enum     | `percentReturn` (default), `priceChange`, `volume`, `valueTraded`. |
+| `order`          | enum     | `desc` (default, best first) or `asc` (worst first).       |
+| `limit`          | number   | How many to return when ranking the market. Default 10, max 50. Ignored for a basket. |
+| `minTradingDays` | number   | Sessions a security must have traded on to be ranked. Default 1. |
+
+Every metric is computed for every result regardless of which one you sort by, so
+"which had the highest turnover, and what did it return?" is one call.
+
+```json
+{
+  "rank": 4,
+  "symbol": "DASPHARMA",
+  "name": "Dannex Ayrton Starwin Plc.",
+  "startDate": "2026-07-10",
+  "startClose": 4.1,
+  "endDate": "2026-08-07",
+  "endClose": 5.2,
+  "percentReturn": 26.83,
+  "priceChange": 1.1,
+  "totalVolume": 70063,
+  "totalValueTraded": 341062.4,
+  "quotedDays": 21,
+  "tradingDays": 7,
+  "lastTradedDate": "2026-08-06",
+  "startIsCarriedForward": true,
+  "endIsCarriedForward": false
+}
+```
+
+The last five fields are the ones that stop a number being misread — see
+[below](#a-carried-forward-close-can-move-a-return-into-the-wrong-window).
+
+Anything left out comes back in `excluded` with a reason, so "quoted but nobody
+traded it" is never confused with "no data":
+
+```json
+{ "symbol": "SAMBA", "reason": "untraded" }
+```
+
+**Named securities are never dropped.** Ask to compare `["GCB", "ALW"]` and both
+come back even though ALW has not traded in months — silently returning one of two
+would be a worse answer than a flagged one.
+
+`days` is capped at 400, well below the 7300 the single-symbol tool allows, because
+this query is unfiltered: a twenty-year window would pull most of a 184,000-row
+table on every cache miss. For longer histories use `gse_get_stock_history` on the
+symbols you actually care about.
 
 ### `gse_list_companies`
 
@@ -296,6 +374,32 @@ So "how many days did it trade?" is `rows.filter(r => r.volume > 0).length`, not
 `rows.length`, and a volume ranking must exclude the zeroes or it will report
 ties at nothing.
 
+`gse_rank_stocks` does exactly that: it drops securities that never traded in the
+window and names them in `meta.warning`. On a 30-day window to 2026-08-08 that was
+ALW, PBC and SAMBA — three of 41. Set `minTradingDays: 0` to see them anyway, and
+note that a security you name in `symbols` is never dropped whatever its liquidity.
+
+### A carried-forward close can move a return into the wrong window
+
+When a security does not trade, GSE repeats its last close. That price is still the
+market's most recent valuation, so a return computed across it is real arithmetic —
+but the move it describes may have happened *before* the window.
+
+A security that last traded at 5.00 two hundred days ago and again at 8.00 last week
+will report "+60% over 30 days". Nothing about the arithmetic is wrong; the window
+is the lie. `gse_rank_stocks` cannot prevent this, so it makes it visible instead:
+
+| Field | Tells you |
+| ----- | --------- |
+| `tradingDays` vs `quotedDays` | how many sessions it actually traded on |
+| `lastTradedDate` | when the closing price was last a real trade |
+| `startIsCarriedForward` | the opening price predates the window — this is the flag that catches the case above |
+| `endIsCarriedForward` | the closing price is stale |
+
+Real example from 2026-08-08: DASPHARMA ranked fourth on 30-day return at +26.8%,
+having traded on 7 of 21 sessions with `startIsCarriedForward: true`. The tool
+surfaces that in `meta.warning` too, naming the securities affected.
+
 ### The capital and share-count fields are free text
 
 `statedCapital`, `issuedShares` and `authorisedShares` are strings, passed
@@ -324,11 +428,20 @@ you can actually see and how long each stays fresh:
 | Company directory   | `gse:companies:v1`               | 7 days                                  | yes                   |
 | Fixed-income issuers| `gse:fixed-income-issuers:v1`    | 7 days                                  | no                    |
 | Price history       | `gse:history:v1:{symbol}:{days}` | 15 min during GSE hours, 12 h otherwise | no                    |
+| Market-wide prices  | `gse:market-history:v1:{bucket}` | 15 min during GSE hours, 12 h otherwise | no                    |
 | Market index        | `gse:market-index:v1:{days}`     | 15 min during GSE hours, 12 h otherwise | no                    |
 
 Only the company directory has a built-in fallback list, so it is the only one
 that can come back `static-seed`. The others return a tool error if the scrape
 fails and nothing is cached.
+
+`gse_rank_stocks` caches by *bucket*, not by the exact `days`: a request is
+quantized up to the smallest of 7, 30, 90, 180 or 400 days that covers it, and the
+wider result is trimmed to the window asked for. Otherwise `days: 30` and
+`days: 31` would be two separate scrapes of someone else's site. It also caps the
+tool's whole upstream footprint at five distinct queries however many windows get
+asked about — so a 30-day ranking, a 25-day ranking and a basket comparison over
+either share one fetch.
 
 GSE trades weekdays, roughly 09:30–15:30 GMT (Ghana keeps GMT year-round). Outside
 that window the day's rows are settled, so the longer TTL applies.
@@ -423,6 +536,21 @@ tradeable symbols that *do* appear in the price table, so a caller could otherwi
 look up history for a company the directory never mentioned.
 
 ### Quirks worth knowing before you touch this code
+
+
+**Some share codes carry GSE's own annotation markers.** The price table stores
+`**ALW**` and `PBC**`, while the company directory lists them plain as `ALW` and
+`PBC`. Everything downstream compares codes through `normalizeShareCode`, which
+strips leading and trailing `*`, `#` and `†` — otherwise one security would split
+into two series and corrupt the start price of both. Interior spaces survive, so
+`SCB PREF` never collapses into `SCB`.
+
+**The upstream share-code search is exact, not a substring match.** Searching the
+price table for `SCB` returns only `SCB`, not `SCBPREF`; searching for `ALW`
+returns nothing at all, because the stored code is `**ALW**`. That means
+`gse_get_stock_history` cannot currently reach the two annotated securities —
+`sanitizeSymbol` strips the very asterisks upstream requires. `gse_rank_stocks` is
+unaffected: it fetches the table unfiltered and normalizes afterwards.
 
 - The `Symbol` column arrives as HTML: `<a href='ACCESS' ...>ACCESS</a>`.
 - `recordsTotal` and `recordsFiltered` arrive as JSON *strings* (`"183595"`),

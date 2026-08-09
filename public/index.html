@@ -882,13 +882,13 @@
         <p class="eyebrow">A REMOTE MCP SERVER, STREAMABLE HTTP, NO API KEY</p>
         <h1>Public Ghana market data,<br>wired straight into your <span class="accent">AI tools</span>.</h1>
         <p class="lede">
-          Fourteen read-only tools bring the Ghana Stock Exchange, the Bank of Ghana, the Ghana
+          Fifteen read-only tools bring the Ghana Stock Exchange, the Bank of Ghana, the Ghana
           Statistical Service and the IMF to any MCP client — Claude, or anything else that
           speaks the protocol. No scraping in your prompt, no stale copy-paste from a PDF.
         </p>
         <div class="cta-row">
           <a class="btn primary" href="#setup">Connect a client →</a>
-          <a class="btn" href="#tools">Browse the fourteen tools</a>
+          <a class="btn" href="#tools">Browse the fifteen tools</a>
         </div>
       </div>
     </section>
@@ -896,7 +896,7 @@
     <section class="stats">
       <div class="stat-grid">
         <div class="stat">
-          <div class="value num">14</div>
+          <div class="value num">15</div>
           <div class="label">Read-only tools</div>
         </div>
         <div class="stat">
@@ -925,7 +925,7 @@
     <section id="tools">
       <div class="section-head">
         <p class="eyebrow">THE LEDGER</p>
-        <h2>Fourteen tools, four sources</h2>
+        <h2>Fifteen tools, four sources</h2>
         <p>Every tool is read-only and namespaced by where its data comes from. Full parameter
           reference lives in the repo's <code>docs/</code> folder, linked from each row.</p>
       </div>
@@ -939,6 +939,10 @@
         <div class="ledger-row">
           <code>gse_get_stock_history</code>
           <span class="returns">Daily prices and volume for one share code, back to 2007</span>
+        </div>
+        <div class="ledger-row">
+          <code>gse_rank_stocks</code>
+          <span class="returns">Rank the whole exchange, or compare a named basket, by return, price change, volume or turnover — one request</span>
         </div>
         <div class="ledger-row">
           <code>gse_list_companies</code>
@@ -1223,7 +1227,7 @@ npm run dev</pre>
           <h3>Equity research copilot</h3>
           <p>Look up a share by name, pull its full price history, and read it alongside the
             GSE Composite Index for context — without a ticker cheat-sheet.</p>
-          <div class="tools-used">gse_search_company · gse_get_stock_history · gse_get_market_index</div>
+          <div class="tools-used">gse_rank_stocks · gse_get_stock_history · gse_get_market_index</div>
         </div>
         <div class="usecase">
           <div class="glyph">₵</div>
@@ -1282,6 +1286,11 @@ npm run dev</pre>
           <div class="bar"><span class="dot"></span> Chat</div>
           <div class="msg q">What has MTN Ghana's share price done this month?</div>
           <div class="msg a"><span class="tool">gse</span><span class="text">Pulls MTNGH's daily history, reads the last few weeks, and describes the move — with the actual close prices, not a guess.</span></div>
+        </div>
+        <div class="transcript">
+          <div class="bar"><span class="dot"></span> Chat</div>
+          <div class="msg q">What are the best performing stocks on the GSE?</div>
+          <div class="msg a"><span class="tool">gse</span><span class="text">Ranks all 41 listed securities in one request, and excludes the dozen that were quoted but never actually traded — otherwise they pad the leaderboard as fake 0% movers.</span></div>
         </div>
         <div class="transcript">
           <div class="bar"><span class="dot"></span> Chat</div>
