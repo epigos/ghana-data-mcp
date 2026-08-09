@@ -49,10 +49,18 @@ describe("sanitizeSymbol", () => {
     expect(sanitizeSymbol("Dannex.")).toBe("DANNEX.");
   });
 
-  // The share-code search runs as a regex upstream, so an unescaped `.*` would
-  // silently widen the query to every listed company.
-  it("strips regex metacharacters", () => {
-    expect(sanitizeSymbol(".*")).toBe(".");
+  // GSE annotates two of its own share codes: the price table stores `**ALW**` and
+  // `PBC**`, and the column search compares the whole value literally. Stripping
+  // the asterisks — as this used to — made both securities unreachable.
+  it("keeps the annotation markers GSE puts in real share codes", () => {
+    expect(sanitizeSymbol("**ALW**")).toBe("**ALW**");
+    expect(sanitizeSymbol("PBC**")).toBe("PBC**");
+  });
+
+  // The search is a literal comparison, not a regex — verified against the live
+  // table, where `.*SCB.*` matches nothing while `SCB` matches. So these characters
+  // cannot widen a query; they are dropped because no real share code contains them.
+  it("drops characters no share code uses", () => {
     expect(sanitizeSymbol("MTN|GCB")).toBe("MTNGCB");
     expect(sanitizeSymbol("^MTNGH$")).toBe("MTNGH");
     expect(sanitizeSymbol("(a)[b]{c}")).toBe("ABC");

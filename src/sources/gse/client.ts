@@ -268,10 +268,12 @@ export class GseClient {
       rangeSeparator: "|",
       columnSearches: {
         1: { value: dateRange(boundedDays), regex: false },
-        // Upstream treats this as a substring regex; parser.ts narrows it to an
-        // exact match afterwards. Regex metacharacters are stripped so a symbol
-        // can never turn into a pattern that matches everything.
-        2: { value: sanitizeSymbol(symbol), regex: true },
+        // Literal, whole-value match. Measured against the live table: `SCB`
+        // returns only `SCB` and never `SCBPREF`, and `.*SCB.*` with regex:true
+        // returns nothing at all — the flag is ignored and the value is compared
+        // as-is. So the code sent here must be exactly what upstream stores,
+        // annotation markers included; `tools.ts` resolves that first.
+        2: { value: sanitizeSymbol(symbol), regex: false },
       },
       // At most ~5 trading days per calendar week, so `days` is always a
       // generous upper bound on the row count for the window.
@@ -456,9 +458,20 @@ export const FIXED_INCOME_COLUMN_NAMES = [
   "shelfregistration",
 ] as const;
 
-/** GSE searches share codes as a regex; keep only characters real codes use. */
+/**
+ * Keeps only the characters real GSE share codes use.
+ *
+ * `*` is on the allowlist because it is part of several codes, not decoration:
+ * the price table stores `**ALW**` and `PBC**`. Stripping it — as this function
+ * used to — made those two securities unreachable, because the column search is a
+ * literal whole-value comparison and `ALW` matches nothing.
+ *
+ * That is safe now that the search is known to be literal rather than a regex: the
+ * value is compared as-is and form-encoded on the way out, so no character here can
+ * turn into a pattern.
+ */
 export function sanitizeSymbol(symbol: string): string {
-  return symbol.trim().toUpperCase().replace(/[^A-Z0-9 .-]/g, "");
+  return symbol.trim().toUpperCase().replace(/[^A-Z0-9 .*#-]/g, "");
 }
 
 /** `dd/mm/yyyy|dd/mm/yyyy`, the format wpDataTables' range filter expects. */

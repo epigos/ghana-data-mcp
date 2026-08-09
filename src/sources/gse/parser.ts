@@ -487,7 +487,10 @@ export function extractSymbols(payload: unknown): string[] {
   for (const raw of extractDataArray(payload)) {
     if (!Array.isArray(raw)) continue;
     const symbol = raw[HISTORY_COLUMNS.symbol];
-    if (typeof symbol === "string" && symbol.trim()) symbols.add(normalizeShareCode(symbol));
+    // Deliberately NOT normalized: this reports what codes upstream literally
+    // stores, annotation markers and all, which is what a caller needs in order to
+    // ask for one back. `normalizeShareCode` is for comparison, not for querying.
+    if (typeof symbol === "string" && symbol.trim()) symbols.add(symbol.trim());
   }
   return [...symbols].sort();
 }

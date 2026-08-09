@@ -11,7 +11,13 @@ import {
   StockPriceRowSchema,
 } from "../../../src/sources/gse/types.js";
 import { fixture, fixtureJson } from "../../helpers/fixtures.js";
-import { errorResponse, htmlResponse, jsonResponse, stubFetch } from "../../helpers/stubFetch.js";
+import {
+  errorResponse,
+  htmlResponse,
+  jsonResponse,
+  stubFetch,
+  type RecordedCall,
+} from "../../helpers/stubFetch.js";
 
 const tradingPageHtml = fixture("trading-and-data.trimmed.html");
 const listedCompaniesHtml = fixture("listed-companies.trimmed.html");
@@ -30,6 +36,8 @@ interface Harness {
   client: Client;
   cache: Cache;
   calls: () => number;
+  /** Recorded requests, for asserting what was actually sent upstream. */
+  requests: () => RecordedCall[];
 }
 
 /**
@@ -82,7 +90,7 @@ async function harness(
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
 
-  return { client, cache, calls: () => calls.length };
+  return { client, cache, calls: () => calls.length, requests: () => calls };
 }
 
 // The SDK types the result loosely; these narrow it for readable assertions.
@@ -155,6 +163,61 @@ describe("gse_get_stock_history", () => {
     const { client } = await harness();
     const result = await call(client, "gse_get_stock_history", { symbol: "mtngh" });
     expect((result.structuredContent as { rowCount: number }).rowCount).toBeGreaterThan(0);
+  });
+
+  // A transient failure of the stored-code lookup falls back to the plain code and
+  // returns nothing. Keying the cache on the resolved code means that empty answer
+  // cannot shadow the correct one once resolution starts working again.
+  it("does not let a failed code resolution poison the cache for the working code", async () => {
+    const cache = createCache(createMemoryKV());
+
+    // First: the symbol lookup fails, so it falls back to the plain code and finds nothing.
+    const broken = await harness({
+      cache,
+      now: AFTER_FIXTURE,
+      responses: [() => errorResponse(500), () => errorResponse(500), () => jsonResponse({ data: [] })],
+    });
+    const first = await call(broken.client, "gse_get_stock_history", { symbol: "ALW", days: 30 });
+    expect((first.structuredContent as { rowCount: number }).rowCount).toBe(0);
+
+    // Then, on the same cache, resolution succeeds and the correct rows come back.
+    const working = await harness({
+      cache,
+      now: AFTER_FIXTURE,
+      responses: [() => jsonResponse(marketHistoryPayload), () => jsonResponse(marketHistoryPayload)],
+    });
+    const second = await call(working.client, "gse_get_stock_history", { symbol: "ALW", days: 30 });
+
+    expect((second.structuredContent as { rowCount: number }).rowCount).toBeGreaterThan(0);
+  });
+
+  // GSE stores two share codes annotated (`**ALW**`, `PBC**`) while the directory
+  // lists them plain, and the upstream column search is a literal whole-value
+  // comparison — so asking for `ALW` used to match nothing at all. The tool now
+  // resolves the stored spelling before querying.
+  it("finds a security whose share code is stored with annotation markers", async () => {
+    const { client, requests } = await harness({
+      responses: [
+        // First POST is the stored-code lookup (a short unfiltered window).
+        () => jsonResponse(marketHistoryPayload),
+        () => jsonResponse(marketHistoryPayload),
+      ],
+      now: AFTER_FIXTURE,
+    });
+
+    const result = await call(client, "gse_get_stock_history", { symbol: "ALW", days: 30 });
+    const payload = result.structuredContent as { symbol: string; rowCount: number };
+
+    expect(result.isError).toBeFalsy();
+    expect(payload.rowCount).toBeGreaterThan(0);
+    // Reported under the plain code the caller asked for...
+    expect(payload.symbol).toBe("ALW");
+
+    // ...but queried upstream under the annotated one it is actually stored as.
+    const bodies = requests()
+      .filter((request) => request.method === "POST")
+      .map((request) => decodeURIComponent(request.body ?? ""));
+    expect(bodies.some((body) => body.includes("**ALW**"))).toBe(true);
   });
 
   it("serves the second identical call from cache without re-scraping", async () => {

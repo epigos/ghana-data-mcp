@@ -16,6 +16,7 @@ import {
   type CompanyDirectory,
 } from "./companies.js";
 import {
+  extractSymbols,
   normalizeShareCode,
   parseFixedIncomeIssuersPayload,
   parseHistoryPayload,
@@ -55,6 +56,22 @@ import {
 /** GFIM admissions change a few times a year at most. */
 const FIXED_INCOME_CACHE_KEY = "gse:fixed-income-issuers:v1";
 const FIXED_INCOME_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+/**
+ * The share codes the price table literally stores, annotation markers and all.
+ *
+ * Needed because the column search is a whole-value literal comparison — measured,
+ * not assumed: `SCB` returns only `SCB` and never `SCBPREF`, and `.*SCB.*` with the
+ * regex flag set returns nothing at all. So asking for `ALW` finds nothing, because
+ * upstream stores `**ALW**`.
+ *
+ * One short unfiltered window (~200 rows) yields every stored code, and annotations
+ * change about as often as a listing does, so this is cached for a week and shared
+ * by every symbol lookup.
+ */
+const PRICE_SYMBOLS_CACHE_KEY = "gse:price-symbols:v1";
+const PRICE_SYMBOLS_TTL_SECONDS = 7 * 24 * 60 * 60;
+const PRICE_SYMBOLS_WINDOW_DAYS = 7;
 
 /**
  * MCP tool surface for the GSE source. Every tool is prefixed `gse_` so a future
@@ -117,13 +134,24 @@ export function registerGseTools(server: McpServer, deps: GseDeps): void {
       log.info("tool: gse_get_stock_history", { symbol: normalizedSymbol, days: requestedDays });
 
       try {
-        const key = `gse:history:v1:${normalizedSymbol}:${requestedDays}`;
+        // Upstream compares the share code literally, so it has to be spelled the
+        // way upstream spells it. Best-effort: if the lookup fails, fall back to
+        // the caller's code, which is right for the 39 securities GSE stores plain.
+        const storedSymbol = await resolveStoredSymbol(deps, normalizedSymbol, log);
+
+        // Keyed on the *stored* code, not the caller's. If the resolution above
+        // transiently failed and fell back to the plain code, the empty result that
+        // produces is cached under a different key than the correct one — so a later
+        // successful resolution recovers immediately instead of being shadowed by a
+        // poisoned entry for the rest of the TTL. For the 39 securities GSE stores
+        // plain the two are identical and nothing changes.
+        const key = `gse:history:v1:${storedSymbol}:${requestedDays}`;
         const ttl = historyTtlSeconds(now());
-        log.debug("cache: lookup", { key, ttlSeconds: ttl });
+        log.debug("cache: lookup", { key, ttlSeconds: ttl, storedSymbol });
 
         const result = await readThrough(deps.cache, key, ttl, async () => {
           const payload = await deps.client.fetchStockHistory({
-            symbol: normalizedSymbol,
+            symbol: storedSymbol,
             days: requestedDays,
           });
           return parseHistoryPayload(payload, { symbol: normalizedSymbol });
@@ -642,6 +670,44 @@ export function registerGseTools(server: McpServer, deps: GseDeps): void {
  * share codes still lets a caller look up prices; a tool error would leave them
  * with nothing.
  */
+/**
+ * Maps a plain share code onto the form the price table actually stores.
+ *
+ * `ALW` → `**ALW**`, `PBC` → `PBC**`, and every other code onto itself. Falls back
+ * to the caller's code if the lookup fails: a stale or missing map must not break a
+ * lookup for the 39 securities that are stored plain anyway.
+ */
+async function resolveStoredSymbol(
+  deps: GseDeps,
+  normalizedSymbol: string,
+  log: Logger,
+): Promise<string> {
+  try {
+    const result = await readThrough(
+      deps.cache,
+      PRICE_SYMBOLS_CACHE_KEY,
+      PRICE_SYMBOLS_TTL_SECONDS,
+      async () =>
+        extractSymbols(await deps.client.fetchMarketHistory({ days: PRICE_SYMBOLS_WINDOW_DAYS })),
+    );
+
+    const stored = result.value.find((code) => normalizeShareCode(code) === normalizedSymbol);
+    if (stored && stored !== normalizedSymbol) {
+      log.debug("gse: share code is stored annotated upstream", {
+        requested: normalizedSymbol,
+        stored,
+      });
+    }
+    return stored ?? normalizedSymbol;
+  } catch (error) {
+    log.warn("gse: could not resolve the stored share code; using it as given", {
+      symbol: normalizedSymbol,
+      reason: describeError(error),
+    });
+    return normalizedSymbol;
+  }
+}
+
 /**
  * Resolves one caller-supplied token to a share code.
  *

@@ -427,6 +427,7 @@ you can actually see and how long each stays fresh:
 | ------------------- | -------------------------------- | --------------------------------------- | --------------------- |
 | Company directory   | `gse:companies:v1`               | 7 days                                  | yes                   |
 | Fixed-income issuers| `gse:fixed-income-issuers:v1`    | 7 days                                  | no                    |
+| Stored share codes  | `gse:price-symbols:v1`           | 7 days                                  | no                    |
 | Price history       | `gse:history:v1:{symbol}:{days}` | 15 min during GSE hours, 12 h otherwise | no                    |
 | Market-wide prices  | `gse:market-history:v1:{bucket}` | 15 min during GSE hours, 12 h otherwise | no                    |
 | Market index        | `gse:market-index:v1:{days}`     | 15 min during GSE hours, 12 h otherwise | no                    |
@@ -545,12 +546,12 @@ strips leading and trailing `*`, `#` and `†` — otherwise one security would 
 into two series and corrupt the start price of both. Interior spaces survive, so
 `SCB PREF` never collapses into `SCB`.
 
-**The upstream share-code search is exact, not a substring match.** Searching the
-price table for `SCB` returns only `SCB`, not `SCBPREF`; searching for `ALW`
-returns nothing at all, because the stored code is `**ALW**`. That means
-`gse_get_stock_history` cannot currently reach the two annotated securities —
-`sanitizeSymbol` strips the very asterisks upstream requires. `gse_rank_stocks` is
-unaffected: it fetches the table unfiltered and normalizes afterwards.
+**The upstream share-code search is a literal whole-value match.** Searching the
+price table for `SCB` returns only `SCB`, never `SCBPREF`, and the `regex` flag is
+ignored — `.*SCB.*` matches nothing. So a query has to spell a code exactly as the
+table stores it. `gse_get_stock_history` resolves that first, mapping `ALW` onto
+the stored `**ALW**` via a weekly-cached list of the codes actually in use
+(`gse:price-symbols:v1`), and reports results back under the plain code.
 
 - The `Symbol` column arrives as HTML: `<a href='ACCESS' ...>ACCESS</a>`.
 - `recordsTotal` and `recordsFiltered` arrive as JSON *strings* (`"183595"`),
