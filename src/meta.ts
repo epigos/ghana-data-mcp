@@ -12,5 +12,5 @@
  */
 
 export const SERVER_NAME = "ghana-data-mcp";
-export const SERVER_VERSION = "0.1.1";
+export const SERVER_VERSION = "0.1.2";
 export const REPO_URL = "https://github.com/epigos/ghana-data-mcp";
