@@ -175,7 +175,7 @@ Pushing to `main` runs CI and deploys nothing. **Publishing a GitHub release is 
 deploys.**
 
 ```bash
-npm version minor                       # or patch / major
+npm version patch                       # or minor / major
 git push --follow-tags
 gh release create "v$(jq -r .version package.json)" \
   -t "Ghana data MCP v$(jq -r .version package.json)" --generate-notes
