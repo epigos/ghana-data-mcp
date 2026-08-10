@@ -212,30 +212,6 @@ Publishing the release runs [`deploy.yml`](.github/workflows/deploy.yml), which:
 Pre-releases are skipped: there is one Worker, so `--prerelease` would overwrite
 production. To roll back, `npx wrangler versions list` then `npx wrangler rollback`.
 
-#### One-time setup
-
-In **Settings → Environments**, create an environment named `production`:
-
-| Kind     | Name                    | Value                                            |
-| -------- | ----------------------- | ------------------------------------------------ |
-| Secret   | `CLOUDFLARE_API_TOKEN`  | A scoped Cloudflare API token, see below          |
-| Variable | `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account id                        |
-| Variable | `WORKER_BASE_URL`       | e.g. `https://ghana-data-mcp.epigos.workers.dev`  |
-
-Restrict its deployment branches and tags to the tag pattern `v*`, so the token cannot be
-reached from a branch. Keeping the token on the environment rather than in repo secrets
-means it is only ever injected into the deploy job — not into `upstream-canary.yml`, which
-talks to third-party sites, nor any workflow added later.
-
-The token needs two permissions, scoped to the one account: **Workers Scripts → Edit**
-(uploads the script and the `public/` assets) and **Workers KV Storage → Edit** (for the
-`GSE_CACHE` binding). No Zone permissions — `wrangler.toml` declares no routes or custom
-domains. Setting `CLOUDFLARE_ACCOUNT_ID` lets the token skip account-listing permission and
-removes a CI failure mode that has no interactive prompt to recover from.
-
-Do this **before** the first release: the tag is created before the workflow runs, so a
-missing token means unpicking a published release.
-
 ## How it works
 
 ```
