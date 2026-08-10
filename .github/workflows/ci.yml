@@ -47,6 +47,7 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    environment: default
 
     steps:
       - uses: actions/checkout@v5
