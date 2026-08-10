@@ -1,6 +1,6 @@
 {
   "name": "ghana-data-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "MCP server exposing public Ghana data (Ghana Stock Exchange prices and company directory) to AI tools.",
