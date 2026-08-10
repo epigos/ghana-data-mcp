@@ -243,6 +243,15 @@ site happens to be up. Neither workflow needs a secret.
 
 BoG's live tests run separately, via `npm run test:live:bog`.
 
+## Contributors
+
+<a href="https://github.com/epigos/ghana-data-mcp/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=epigos/ghana-data-mcp" alt="Contributors to ghana-data-mcp" />
+</a>
+
+Adding a data source is documented in [CONTRIBUTING.md](CONTRIBUTING.md) — it is the
+shape the whole repo is built around, so a new source is mostly filling in four files.
+
 ## License
 
 MIT
