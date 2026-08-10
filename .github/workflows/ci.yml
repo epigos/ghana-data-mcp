@@ -44,10 +44,13 @@ jobs:
       - name: Unit tests
         run: npm test
 
+  # Deliberately carries no `environment:`. This job deploys nothing — the dry run
+  # below is offline — and naming an environment here would record a bogus
+  # deployment for every PR, and stall every PR behind an approval the moment a
+  # protection rule were added to it. Real deploys live in deploy.yml.
   build:
     name: Build
     runs-on: ubuntu-latest
-    environment: default
 
     steps:
       - uses: actions/checkout@v5

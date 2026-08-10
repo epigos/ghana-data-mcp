@@ -1,6 +1,7 @@
 # ghana-data-mcp
 
 [![CI](https://github.com/epigos/ghana-data-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/epigos/ghana-data-mcp/actions/workflows/ci.yml)
+[![Deploy](https://github.com/epigos/ghana-data-mcp/actions/workflows/deploy.yml/badge.svg)](https://github.com/epigos/ghana-data-mcp/actions/workflows/deploy.yml)
 [![Upstream canary](https://github.com/epigos/ghana-data-mcp/actions/workflows/upstream-canary.yml/badge.svg)](https://github.com/epigos/ghana-data-mcp/actions/workflows/upstream-canary.yml)
 
 An MCP server that gives AI tools access to public Ghana data — share prices from the
@@ -146,6 +147,8 @@ of its data — [GSE](docs/GSE.md#sample-chat-queries),
 
 ## Deploying
 
+### Your own copy
+
 1. Create your own KV namespace — the id in `wrangler.toml` belongs to the maintainer's
    account and will not work in yours:
 
@@ -153,7 +156,8 @@ of its data — [GSE](docs/GSE.md#sample-chat-queries),
    npx wrangler kv namespace create GSE_CACHE
    ```
 
-   Paste the id it prints over the `id` under `[[kv_namespaces]]`.
+   Paste the id it prints over the `id` under `[[kv_namespaces]]`, and change `name` in
+   `wrangler.toml` too unless you want to fight over the same `workers.dev` subdomain.
 
 2. Deploy:
 
@@ -161,9 +165,76 @@ of its data — [GSE](docs/GSE.md#sample-chat-queries),
    npm run deploy
    ```
 
-No secrets and no authentication — the data is public. It fits comfortably in the Workers
-free tier: KV absorbs the repeat queries, and the fetches are I/O-bound, so billed CPU
-time stays low.
+The Worker itself needs no secrets and no authentication — the data is public. It fits
+comfortably in the Workers free tier: KV absorbs the repeat queries, and the fetches are
+I/O-bound, so billed CPU time stays low.
+
+### Releasing this repo
+
+Pushing to `main` runs CI and deploys nothing. **Publishing a GitHub release is what
+deploys.**
+
+```bash
+npm version minor                       # or patch / major
+git push --follow-tags
+gh release create "v$(jq -r .version package.json)" \
+  -t "Ghana data MCP v$(jq -r .version package.json)" --generate-notes
+```
+
+`npm version` does the whole bump in one commit: it runs the typecheck and tests first,
+writes the new version to `package.json` and `package-lock.json`, runs
+[`scripts/sync-version.mjs`](scripts/sync-version.mjs) to rewrite `SERVER_VERSION` in
+`src/meta.ts`, stages that file so it lands in the same commit, and tags it. The version
+has to move in both files together — `src/meta.ts` hardcodes it rather than importing
+`package.json`, because that import would drag devDependencies into the Worker bundle, and
+it is what `/health`, the `ping` tool, the MCP handshake and the outbound `User-Agent` all
+report.
+
+Push before creating the release. If you forget, GitHub creates the tag at the *remote*
+`main` — which does not contain the bump — and the release then fails at step 1 below
+rather than shipping something mislabelled.
+
+With `--no-git-tag-version` there is no commit or tag; both files are still updated, and
+`src/meta.ts` is left staged for you to commit yourself.
+
+Publishing the release runs [`deploy.yml`](.github/workflows/deploy.yml), which:
+
+1. Checks the tag matches `package.json` — a `v0.2.0` tag on a `0.1.0` package fails here,
+   before anything ships, instead of putting a Worker live that reports the wrong version
+   on all four surfaces above.
+2. Re-runs typecheck and the unit tests on the tagged commit — a tag can point at a commit
+   `main`'s CI never saw. `test/meta.test.ts` is what catches `package.json` and
+   `src/meta.ts` disagreeing.
+3. Runs `wrangler deploy`.
+4. Polls `/health` until it reports the released version, for up to a minute — Cloudflare
+   takes a few seconds to propagate a new version across its edge.
+
+Pre-releases are skipped: there is one Worker, so `--prerelease` would overwrite
+production. To roll back, `npx wrangler versions list` then `npx wrangler rollback`.
+
+#### One-time setup
+
+In **Settings → Environments**, create an environment named `production`:
+
+| Kind     | Name                    | Value                                            |
+| -------- | ----------------------- | ------------------------------------------------ |
+| Secret   | `CLOUDFLARE_API_TOKEN`  | A scoped Cloudflare API token, see below          |
+| Variable | `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account id                        |
+| Variable | `WORKER_BASE_URL`       | e.g. `https://ghana-data-mcp.epigos.workers.dev`  |
+
+Restrict its deployment branches and tags to the tag pattern `v*`, so the token cannot be
+reached from a branch. Keeping the token on the environment rather than in repo secrets
+means it is only ever injected into the deploy job — not into `upstream-canary.yml`, which
+talks to third-party sites, nor any workflow added later.
+
+The token needs two permissions, scoped to the one account: **Workers Scripts → Edit**
+(uploads the script and the `public/` assets) and **Workers KV Storage → Edit** (for the
+`GSE_CACHE` binding). No Zone permissions — `wrangler.toml` declares no routes or custom
+domains. Setting `CLOUDFLARE_ACCOUNT_ID` lets the token skip account-listing permission and
+removes a CI failure mode that has no interactive prompt to recover from.
+
+Do this **before** the first release: the tag is created before the workflow runs, so a
+missing token means unpicking a published release.
 
 ## How it works
 
@@ -236,10 +307,13 @@ Details, and the other ways round it, in
 | Workflow | Trigger | Does |
 | -------- | ------- | ---- |
 | [`ci.yml`](.github/workflows/ci.yml) | push to `main`, PRs, manual | Typecheck + unit tests on Node 22 and 24, plus a `wrangler deploy --dry-run` bundle check |
+| [`deploy.yml`](.github/workflows/deploy.yml) | a published GitHub release | Checks the tag matches `package.json`, re-runs typecheck and tests on the tagged commit, `wrangler deploy`, then polls `/health` for the released version |
 | [`upstream-canary.yml`](.github/workflows/upstream-canary.yml) | 16:30 UTC Mon & Thu, manual | The live tests against gse.com.gh and the IMF DataMapper API |
 
 The split is the point: CI stays green or red on **our** code, never on whether a source
-site happens to be up. Neither workflow needs a secret.
+site happens to be up — and it never deploys. `ci.yml` and `upstream-canary.yml` need no
+credentials at all; `deploy.yml` is the only workflow that holds a secret, and it only runs
+on a published release.
 
 BoG's live tests run separately, via `npm run test:live:bog`.
 

@@ -28,9 +28,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:live": "GSE_LIVE=1 vitest run test/integration",
+    "test:live:bog": "BOG_LIVE=1 vitest run test/integration/bog.live.test.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
     "cf-typegen": "wrangler types",
-    "test:live:bog": "BOG_LIVE=1 vitest run test/integration/bog.live.test.ts"
+    "preversion": "npm run typecheck && npm test",
+    "version": "node scripts/sync-version.mjs && git add src/meta.ts"
   },
   "engines": {
     "node": ">=22"
