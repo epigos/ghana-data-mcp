@@ -8,6 +8,13 @@ import type { Granularity, PeriodMeta } from "./types.js";
  *   `2023`      annual
  *   `2024Q2`    quarterly
  *   `2024M06`   monthly
+ *   `2026-05`   monthly, ISO-style
+ *
+ * The last one is not a fourth convention so much as evidence there is no
+ * convention: when GSS republished MIEG in August 2026 the new vintage switched
+ * its axis from `2023M01` to `2023-01` at the same time as its filename changed.
+ * Every other table still uses `M`. Both spellings normalize to the same `label`
+ * below, so nothing downstream has to know which one a table happens to use.
  *
  * plus an asterisk suffix on the GDP tables marking data GSS has not finalized:
  * `2024*` is provisional and `2025**` is a forecast. The asterisks are part of the
@@ -29,6 +36,7 @@ import type { Granularity, PeriodMeta } from "./types.js";
 const ANNUAL = /^(\d{4})(\*{1,2})?$/;
 const QUARTERLY = /^(\d{4})Q([1-4])(\*{1,2})?$/i;
 const MONTHLY = /^(\d{4})M(\d{1,2})(\*{1,2})?$/i;
+const ISO_MONTHLY = /^(\d{4})-(\d{1,2})(\*{1,2})?$/;
 
 /**
  * Parses one upstream period code. Returns undefined for anything that does not
@@ -74,6 +82,23 @@ export function parsePeriod(code: string): PeriodMeta | undefined {
       year: Number(monthly[1]),
       index: month,
       provisional: Boolean(monthly[3]),
+    };
+  }
+
+  // `code` keeps the upstream spelling because that is what a POST has to send
+  // back; `label` is canonical so a caller who types `2026M05` still matches a
+  // table that stores `2026-05`.
+  const isoMonthly = ISO_MONTHLY.exec(raw);
+  if (isoMonthly) {
+    const month = Number(isoMonthly[2]);
+    if (month < 1 || month > 12) return undefined;
+    return {
+      code: raw,
+      label: `${isoMonthly[1]}M${String(month).padStart(2, "0")}`,
+      granularity: "monthly",
+      year: Number(isoMonthly[1]),
+      index: month,
+      provisional: Boolean(isoMonthly[3]),
     };
   }
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { GssClient } from "../../src/sources/gss/client.js";
 import { parseTableData, parseTableSchema } from "../../src/sources/gss/parser.js";
-import { filterByGranularity, latestPeriods } from "../../src/sources/gss/period.js";
+import { filterByGranularity, latestPeriods, parsePeriod } from "../../src/sources/gss/period.js";
 import { findTable, TABLES, type TableDef } from "../../src/sources/gss/tables.js";
 
 /**
@@ -14,7 +14,7 @@ import { findTable, TABLES, type TableDef } from "../../src/sources/gss/tables.j
  * What these protect, in rough order of how likely each is to break:
  *
  *  - **Every table path still resolves.** The MIEG table's upstream filename carries
- *    a publication vintage (`April_26_MIEG_Px.px`) and *will* change when GSS
+ *    a publication vintage (`mieg_px_May26.px` today) and *will* change when GSS
  *    publishes a new one. That is a 404 the registry cannot predict, so the test
  *    below walks the folder listing to tell you the new name when it happens.
  *  - The two-step contract: GET returns a schema, POST returns data for it.
@@ -123,16 +123,37 @@ describe.skipIf(!live)("StatsBank (live)", () => {
   // simplified — until then it documents why it exists.
   it("still resolves filter:top against storage order, not chronology", async () => {
     const mieg = table("mieg");
+
+    // Every value here is read from the live schema rather than written down.
+    // The August 2026 vintage renamed all of them — `TOTAL` became `Total_MIEG`,
+    // `GROWTH` became "MIEG Index Growth (year-on-year %)" — and hardcoding them
+    // made this test fail for a reason that had nothing to do with what it checks.
+    // The claim under test is about *ordering*, which holds whichever slice we ask
+    // for, so asking for whatever the table currently offers is both more honest
+    // and durable across the next vintage.
+    const raw = (await client.fetchTableSchema(mieg.path)) as {
+      variables: Array<{ code: string; values: string[] }>;
+    };
+    const valuesOf = (code: string) => {
+      const values = raw.variables.find((v) => v.code === code)?.values;
+      expect(values, `${code} missing from the MIEG schema`).toBeTruthy();
+      return values!;
+    };
+    const storageFirstMonth = valuesOf(mieg.timeVariable)[0]!;
+
     const payload = (await client.fetchTableData(mieg.path, [
       // Cast: `top` is deliberately outside PxQuerySelection's type, since no
       // production path may send it.
-      { code: "Month", selection: { filter: "top" as "item", values: ["1"] } },
-      { code: "Variable", selection: { filter: "item", values: ["TOTAL"] } },
-      { code: "GDP_Series", selection: { filter: "item", values: ["GROWTH"] } },
+      { code: mieg.timeVariable, selection: { filter: "top" as "item", values: ["1"] } },
+      { code: "Variable", selection: { filter: "item", values: [valuesOf("Variable")[0]!] } },
+      { code: "GDP_Series", selection: { filter: "item", values: [valuesOf("GDP_Series")[0]!] } },
     ])) as { data: Array<{ key: string[] }> };
 
     const returned = payload.data[0]?.key[0];
-    expect(returned).toBe("2023M01"); // the oldest month, not the newest
+    // The whole point: `top: 1` hands back the month stored first, which on this
+    // table is the oldest one — not the latest, which is what the name suggests.
+    expect(returned).toBe(storageFirstMonth);
+    expect(parsePeriod(storageFirstMonth)?.label).toBe("2023M01");
   }, 90_000);
 
   it("can rediscover a table filename from the folder listing", async () => {
@@ -145,7 +166,7 @@ describe.skipIf(!live)("StatsBank (live)", () => {
     const tables = listing.filter((entry) => entry.type === "t").map((entry) => entry.id);
     expect(tables.length).toBeGreaterThan(0);
     expect(tables, `MIEG filename moved; update tables.ts to one of: ${tables.join(", ")}`).toContain(
-      "April_26_MIEG_Px.px",
+      "mieg_px_May26.px",
     );
   }, 90_000);
 });

@@ -364,7 +364,7 @@ Four things about StatsBank shape this source, all verified against the live API
   of the 16 tables, so the time axis is named per-table in
   [`tables.ts`](../src/sources/gss/tables.ts) rather than discovered.
 - **One table's filename carries a publication vintage.** MIEG lives at
-  `April_26_MIEG_Px.px` and that name will change when GSS publishes a new vintage.
+  `mieg_px_May26.px` and that name changes whenever GSS publishes a new vintage (it was `April_26_MIEG_Px.px` until August 2026). The client re-reads the folder listing and recovers automatically when the pinned name 404s.
   The live canary walks the folder listing so a 404 there tells you the new filename.
 
 ### A note on local development

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ImfClient } from "../../src/sources/imf/client.js";
+import { USER_AGENT } from "../../src/lib/http.js";
 import { parseEntitiesPayload, parseIndicatorsPayload, parseSeriesPayload } from "../../src/sources/imf/parser.js";
 import type { EntityMeta } from "../../src/sources/imf/types.js";
 
@@ -101,6 +102,9 @@ describe.skipIf(!live)("IMF DataMapper (live)", () => {
     const withoutFilter = (await fetchRaw("/external/datamapper/api/v2/NGDP_RPCH")) as {
       values: { NGDP_RPCH: Record<string, unknown> };
     };
+    // Spaced deliberately: two identical-looking requests in the same tick are
+    // what Akamai treats as a burst.
+    await sleep(1_000);
     const withFilter = (await fetchRaw(
       "/external/datamapper/api/v2/NGDP_RPCH/GHA?periods=2020,2021",
     )) as { values: { NGDP_RPCH: Record<string, unknown> } };
@@ -111,12 +115,52 @@ describe.skipIf(!live)("IMF DataMapper (live)", () => {
 
     const ghanaYears = Object.keys(withFilter.values.NGDP_RPCH.GHA as Record<string, unknown>);
     expect(ghanaYears.length).toBeGreaterThan(2); // more than just 2020/2021
-  }, 45_000);
+  }, 120_000); // 4 attempts x 2 calls, with backoff between them
 
+  /**
+   * A deliberately unfiltered request, because the point of the test above is to
+   * observe what the *raw* endpoint does rather than what `ImfClient` makes of it.
+   *
+   * It still cannot be a bare `fetch`, for two reasons learned from a red canary:
+   *
+   * 1. **imf.org sits behind Akamai, which rejects bursts with an HTML page served
+   *    at HTTP 200.** Not a 403, not a JSON error — `response.ok` is true and
+   *    `.json()` then throws `Unexpected token '<'`, which says nothing about what
+   *    actually happened. So the body is checked, not the status, and a rejection
+   *    is retried rather than failing the run: it is transient, and two runners
+   *    sharing an IP range is enough to trigger it.
+   * 2. A bare fetch sends no User-Agent. Every other request this project makes
+   *    identifies itself; this one should too, both out of politeness and so the
+   *    two calls here look like the same client to whatever is counting.
+   *
+   * If a rejection survives all the attempts, the error says so explicitly, so a
+   * future failure reads as "Akamai blocked us" rather than as a parse bug.
+   */
   async function fetchRaw(path: string): Promise<unknown> {
-    const response = await fetch(`https://www.imf.org${path}`, {
-      headers: { accept: "application/json" },
-    });
-    return response.json();
+    const url = `https://www.imf.org${path}`;
+    let lastBody = "";
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (attempt > 0) await sleep(2_000 * 2 ** (attempt - 1));
+
+      const response = await fetch(url, {
+        headers: { accept: "application/json", "user-agent": USER_AGENT },
+      });
+      lastBody = await response.text();
+
+      try {
+        return JSON.parse(lastBody) as unknown;
+      } catch {
+        // Falls through to another attempt; `lastBody` carries the evidence.
+      }
+    }
+
+    throw new Error(
+      `${url} never returned JSON in 4 attempts — last response began ` +
+        `${JSON.stringify(lastBody.slice(0, 120))}. An HTML body here is Akamai's ` +
+        "bot mitigation rejecting the runner, not a change in the API.",
+    );
   }
+
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 });

@@ -53,11 +53,14 @@ export interface TableDef {
 /**
  * `Prices and Inflation/commodity_price.px` is the one upstream filename that
  * differs from its logical name; the MIEG table is worse — its filename carries a
- * publication vintage (`April_26_MIEG_Px.px`) and will change when GSS publishes a
- * new one. The live canary test is what catches that; there is no way to pin it
- * from here. If MIEG starts 404ing, re-read the folder listing at
- * `/api/v1/en/Macroeconomic Indicators/Monthly Indicator of Economic Growth(MIEG)/`
- * and update the path.
+ * publication vintage and changes whenever GSS publishes a new one. It has already
+ * moved once: `April_26_MIEG_Px.px` became `mieg_px_May26.px` (even the naming
+ * convention changed), 404ing the old path and taking four canary tests with it.
+ *
+ * The path below is therefore a starting guess, not a guarantee. `withPathRecovery`
+ * in client.ts re-reads the folder listing when it 404s and retries against the
+ * filename it finds, so a new vintage self-heals instead of going dark until
+ * someone edits this file. The live canary still reports the drift so the guess can be refreshed.
  */
 export const TABLES: readonly TableDef[] = [
   {
@@ -148,7 +151,7 @@ export const TABLES: readonly TableDef[] = [
   {
     id: "mieg",
     aliases: ["monthly_growth", "monthly_indicator_of_economic_growth"],
-    path: "Macroeconomic Indicators/Monthly Indicator of Economic Growth(MIEG)/April_26_MIEG_Px.px",
+    path: "Macroeconomic Indicators/Monthly Indicator of Economic Growth(MIEG)/mieg_px_May26.px",
     title: "Monthly Indicator of Economic Growth (MIEG)",
     sector: "Real Sector (GDP)",
     timeVariable: "Month",

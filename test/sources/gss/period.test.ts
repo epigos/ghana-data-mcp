@@ -24,10 +24,46 @@ const axisOf = (schema: PxSchema, code: string) =>
   schema.variables.find((v) => v.code === code)!.values;
 
 describe("parsePeriod", () => {
-  it("reads the three period shapes StatsBank uses", () => {
+  it("reads the period shapes StatsBank uses", () => {
     expect(parsePeriod("2023")).toMatchObject({ granularity: "annual", year: 2023, index: 1 });
     expect(parsePeriod("2024Q2")).toMatchObject({ granularity: "quarterly", year: 2024, index: 2 });
     expect(parsePeriod("2024M06")).toMatchObject({ granularity: "monthly", year: 2024, index: 6 });
+  });
+
+  // The August 2026 MIEG vintage switched its axis from `2023M01` to `2023-01`
+  // at the same time as its filename changed. Every other table still uses `M`,
+  // so both spellings have to work, and both have to normalize to one label —
+  // otherwise a caller who types what CPI taught them fails on MIEG.
+  it("reads the ISO-style month MIEG switched to, without losing the upstream code", () => {
+    expect(parsePeriod("2026-05")).toMatchObject({
+      code: "2026-05",
+      label: "2026M05",
+      granularity: "monthly",
+      year: 2026,
+      index: 5,
+      provisional: false,
+    });
+    expect(parsePeriod("2026-5")?.label).toBe("2026M05");
+    expect(parsePeriod("2026-05")?.label).toBe(parsePeriod("2026M05")?.label);
+  });
+
+  it("applies the same month bounds to the ISO spelling", () => {
+    for (const bad of ["2026-13", "2026-00", "2026-", "-05", "2026-005"]) {
+      expect(parsePeriod(bad), bad).toBeUndefined();
+    }
+  });
+
+  // An ISO axis still has to sort, or latestPeriods would hand back the wrong end
+  // of it — which is the exact bug filter:"top" causes and this module exists to avoid.
+  it("sorts an ISO-spelled axis chronologically like any other", () => {
+    const axis = parsePeriods(["2023-01", "2026-05", "2024-07"]);
+    expect(axis.map((period) => period.code)).toEqual(["2023-01", "2026-05", "2024-07"]);
+    expect(sortChronologically(axis).map((period) => period.code)).toEqual([
+      "2023-01",
+      "2024-07",
+      "2026-05",
+    ]);
+    expect(latestPeriods(axis, 1)[0]?.code).toBe("2026-05");
   });
 
   // The GDP tables mark unfinalized years with asterisks, and the asterisks are part
@@ -137,6 +173,15 @@ describe("matchPeriod", () => {
 
   it("matches the exact upstream code too", () => {
     expect(matchPeriod("2025**", gdpAxis)?.code).toBe("2025**");
+  });
+
+  // The reason parsePeriod canonicalizes the label: on MIEG the axis is spelled
+  // `2026-05`, but someone reading the docs for any other table will type `2026M05`.
+  it("matches either spelling against an ISO-spelled axis", () => {
+    const axis = parsePeriods(["2026-04", "2026-05"]);
+    expect(matchPeriod("2026M05", axis)?.code).toBe("2026-05");
+    expect(matchPeriod("2026-05", axis)?.code).toBe("2026-05");
+    expect(matchPeriod("2026m5", axis)?.code).toBe("2026-05");
   });
 
   it("tolerates separator and case variants of a month", () => {

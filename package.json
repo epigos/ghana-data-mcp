@@ -27,7 +27,7 @@
     "deploy": "wrangler deploy",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:live": "GSE_LIVE=1 vitest run test/integration",
+    "test:live": "GSE_LIVE=1 BOG_LIVE=1 vitest run test/integration",
     "test:live:bog": "BOG_LIVE=1 vitest run test/integration/bog.live.test.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json",
     "cf-typegen": "wrangler types",

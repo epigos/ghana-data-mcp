@@ -40,7 +40,7 @@ async function harness(
     ["cpi.px", cpiSchema, cpiData],
     ["macro_trade.px", tradeSchema, { columns: [], data: [], metadata: [] }],
     ["agdp_e_px.px", gdpSchema, gdpData],
-    ["MIEG_Px.px", miegSchema, { columns: [], data: [], metadata: [] }],
+    ["mieg_px_May26.px", miegSchema, { columns: [], data: [], metadata: [] }],
   ];
 
   const { fetch: fetchImpl, calls } = stubFetch(

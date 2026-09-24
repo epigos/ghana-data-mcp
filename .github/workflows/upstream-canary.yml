@@ -1,19 +1,25 @@
 name: Upstream canary
 
-# gse.com.gh is a WordPress site with no API contract, so its markup and table
-# ids can change without warning. This is the only job that touches it: it runs
-# the live integration tests that CI deliberately skips, so an upstream change is
-# caught here rather than by a user getting an empty result.
+# None of the four upstreams offers an API contract: gse.com.gh and bog.gov.gh are
+# WordPress sites whose markup and table ids can change without warning, StatsBank
+# stamps one of its filenames with a publication vintage, and IMF's filters behave
+# differently from its own documentation. This is the only job that touches them —
+# it runs the live integration tests CI deliberately skips, so an upstream change
+# is caught here rather than by a user getting an empty result.
 #
-# A failure here does not mean the code is broken — it usually means gse.com.gh
-# changed. Start with test/integration/gse.live.test.ts to see which assumption
-# stopped holding.
+# A failure here usually means an upstream changed, not that the code is broken.
+# The assertion message names the assumption that stopped holding; start there.
+#
+# Precedent for what that looks like: in August 2026 GSS republished MIEG as
+# `mieg_px_May26.px` with an axis spelled `2026-05` instead of `2026M05`, and four
+# tests here went red at once. The client now re-reads the folder listing and
+# recovers on its own, but this job is still what reports the drift.
 
 on:
   schedule:
     # 16:30 UTC Mondays and Thursdays — after the GSE session closes (Ghana is
-    # UTC+0 year-round). Twice weekly keeps the footprint to roughly 30 requests
-    # a week while still catching a breakage within a few days.
+    # UTC+0 year-round). Twice weekly keeps the footprint small while still
+    # catching a breakage within a few days.
     - cron: "30 16 * * 1,4"
   workflow_dispatch:
 
@@ -26,7 +32,7 @@ concurrency:
 
 jobs:
   live:
-    name: Live scrape against gse.com.gh
+    name: Live scrape against all four upstreams
     runs-on: ubuntu-latest
 
     steps:
@@ -39,5 +45,8 @@ jobs:
 
       - run: npm ci
 
+      # `test:live` sets both GSE_LIVE and BOG_LIVE. Until this was fixed the job
+      # set only the former, so bog.gov.gh's 18 live tests skipped on every run and
+      # the canary silently guarded three sources while claiming four.
       - name: Live integration tests
         run: npm run test:live

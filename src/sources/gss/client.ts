@@ -85,6 +85,8 @@ export class GssClient {
   private readonly baseUrl: string;
   private readonly logger: Logger;
   private readonly requestOptions: RequestOptions;
+  /** Pinned path -> the filename it actually lives at now. See withPathRecovery. */
+  private readonly resolvedPaths = new Map<string, string>();
 
   constructor(options: GssClientOptions = {}) {
     const { baseUrl = STATSBANK_BASE_URL, logger = silentLogger, ...requestOptions } = options;
@@ -96,7 +98,9 @@ export class GssClient {
   /** A table's variables and their legal values. */
   async fetchTableSchema(tablePath: string): Promise<unknown> {
     this.logger.info("gss: fetching table schema", { table: tablePath });
-    return this.getJson(this.urlFor(tablePath), `GET ${tablePath}`);
+    return this.withPathRecovery(tablePath, (path) =>
+      this.getJson(this.urlFor(path), `GET ${path}`),
+    );
   }
 
   /**
@@ -113,7 +117,9 @@ export class GssClient {
       variables: query.map((q) => q.code).join(","),
       bodyBytes: body.length,
     });
-    return this.postJson(this.urlFor(tablePath), body, `POST ${tablePath}`);
+    return this.withPathRecovery(tablePath, (path) =>
+      this.postJson(this.urlFor(path), body, `POST ${path}`),
+    );
   }
 
   /**
@@ -126,6 +132,82 @@ export class GssClient {
   async fetchFolder(folderPath: string): Promise<unknown> {
     this.logger.info("gss: fetching folder listing", { folder: folderPath });
     return this.getJson(`${this.urlFor(folderPath)}/`, `GET ${folderPath}/`);
+  }
+
+  /**
+   * Runs an operation against `tablePath`, and if the path 404s, re-reads its
+   * folder listing to find the filename it moved to and runs the operation again.
+   *
+   * This exists because MIEG's filename carries a publication vintage. It has
+   * already moved once — `April_26_MIEG_Px.px` to `mieg_px_May26.px` — which 404ed
+   * the pinned path and took four canary tests with it. Without recovery, every
+   * new vintage takes the table offline until a human edits tables.ts.
+   *
+   * **A 404 here is ambiguous** and that shapes the design. For a GET it can only
+   * mean the path is wrong, but for a POST it can also mean an invalid query —
+   * StatsBank answers a bad variable or value with 404 and an HTML body (see the
+   * module comment). `tools.ts` validates against the cached schema before
+   * posting, so the moved-file case is the likely one, and when discovery finds
+   * nothing new the original error is rethrown untouched. The cost of guessing
+   * wrong is therefore one folder listing on a request that was already failing.
+   *
+   * The memo is per-instance, so a Worker handling one request pays at most one
+   * discovery for a moved table and reuses it for the POST that follows. It is
+   * deliberately not cached in KV: a stale *resolved* path would be far harder to
+   * reason about than a stale pinned one, and the canary prompts a tables.ts
+   * update anyway, which ends the extra request entirely.
+   */
+  private async withPathRecovery<T>(
+    tablePath: string,
+    operation: (path: string) => Promise<T>,
+  ): Promise<T> {
+    const pinned = this.resolvedPaths.get(tablePath) ?? tablePath;
+    try {
+      return await operation(pinned);
+    } catch (error) {
+      if (!(error instanceof UpstreamError) || error.status !== 404) throw error;
+
+      const discovered = await this.discoverTablePath(pinned);
+      if (!discovered || discovered === pinned) throw error;
+
+      this.logger.warn("gss: table filename moved; recovered from folder listing", {
+        pinned,
+        discovered,
+      });
+      this.resolvedPaths.set(tablePath, discovered);
+      return operation(discovered);
+    }
+  }
+
+  /**
+   * The current filename for a table whose pinned path 404ed, from its folder
+   * listing. Returns undefined when the folder holds no tables or more than one —
+   * with several candidates there is no basis for picking, and quietly reading the
+   * wrong table would be worse than failing.
+   */
+  private async discoverTablePath(pinnedPath: string): Promise<string | undefined> {
+    const lastSlash = pinnedPath.lastIndexOf("/");
+    if (lastSlash <= 0) return undefined;
+    const folder = pinnedPath.slice(0, lastSlash);
+
+    let listing: unknown;
+    try {
+      listing = await this.fetchFolder(folder);
+    } catch {
+      // Discovery is best-effort; the caller rethrows the original 404.
+      return undefined;
+    }
+    if (!Array.isArray(listing)) return undefined;
+
+    const tables = listing.filter(
+      (entry): entry is { id: string; type: string } =>
+        typeof entry === "object" &&
+        entry !== null &&
+        (entry as { type?: unknown }).type === "t" &&
+        typeof (entry as { id?: unknown }).id === "string",
+    );
+    if (tables.length !== 1) return undefined;
+    return `${folder}/${tables[0]!.id}`;
   }
 
   private urlFor(path: string): string {
