@@ -1,11 +1,11 @@
 name: Upstream canary
 
-# None of the four upstreams offers an API contract: gse.com.gh and bog.gov.gh are
-# WordPress sites whose markup and table ids can change without warning, StatsBank
-# stamps one of its filenames with a publication vintage, and IMF's filters behave
-# differently from its own documentation. This is the only job that touches them —
-# it runs the live integration tests CI deliberately skips, so an upstream change
-# is caught here rather than by a user getting an empty result.
+# None of these upstreams offers an API contract: gse.com.gh is a WordPress site
+# whose markup and table ids can change without warning, StatsBank stamps one of
+# its filenames with a publication vintage, and IMF's filters behave differently
+# from its own documentation. This is the only job that touches them — it runs the
+# live integration tests CI deliberately skips, so an upstream change is caught
+# here rather than by a user getting an empty result.
 #
 # A failure here usually means an upstream changed, not that the code is broken.
 # The assertion message names the assumption that stopped holding; start there.
@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   live:
-    name: Live scrape against all four upstreams
+    name: Live scrape against GSE, GSS and IMF
     runs-on: ubuntu-latest
 
     steps:
@@ -45,8 +45,12 @@ jobs:
 
       - run: npm ci
 
-      # `test:live` sets both GSE_LIVE and BOG_LIVE. Until this was fixed the job
-      # set only the former, so bog.gov.gh's 18 live tests skipped on every run and
-      # the canary silently guarded three sources while claiming four.
+      # Covers GSE, GSS and IMF. bog.gov.gh is deliberately excluded: it serves an
+      # incomplete certificate chain, so verifying it needs NODE_EXTRA_CA_CERTS
+      # pointed at the missing intermediate — a per-machine step a runner does not
+      # have. Enabling it here fails all 18 of its tests with "could not be reached"
+      # and leaves the canary permanently red over a defect on BoG's server.
+      # Run those locally with `npm run test:live:bog`; the header of
+      # test/integration/bog.live.test.ts has the detail.
       - name: Live integration tests
         run: npm run test:live
