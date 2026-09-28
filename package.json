@@ -41,7 +41,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "agents": "^0.24.0",
     "linkedom": "^0.18.13",
-    "zod": "^4.4.3"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260921.1",
